@@ -1,0 +1,262 @@
+#!/system/bin/sh
+# ==============================================================================
+# chroot-helper - Core engine for multi-distro chroot management
+# Actions: run <distro> [cmd...], stop <distro>, status [distro]
+# ==============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+DISTROS_DIR="$BASE_DIR/distros"
+UTILS_DIR="$BASE_DIR/utils"
+
+# Auto-add bundled utils to PATH if available
+[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
+
+# Auto-escalate via su-helper if not running as root
+if [ "$(id -u)" -ne 0 ]; then
+    if [ -x "$SCRIPT_DIR/su-helper" ]; then
+        exec "$SCRIPT_DIR/su-helper" "$0" "$@"
+    else
+        echo "[!] Error: Root required. $SCRIPT_DIR/su-helper not found." >&2
+        exit 1
+    fi
+fi
+
+ACTION="$1"
+shift || true
+
+list_available_distros() {
+    if [ -d "$DISTROS_DIR" ]; then
+        for f in "$DISTROS_DIR"/*.conf; do
+            [ -f "$f" ] && basename "$f" .conf
+        done
+    fi
+}
+
+load_distro_config() {
+    local name="$1"
+    if [ -z "$name" ]; then
+        echo "[!] Error: No distribution specified." >&2
+        echo "Available distributions:" >&2
+        list_available_distros | sed 's/^/  - /' >&2
+        exit 1
+    fi
+
+    local conf="$DISTROS_DIR/$name.conf"
+    if [ ! -f "$conf" ]; then
+        echo "[!] Error: Configuration for distribution '$name' not found at $conf" >&2
+        echo "Available distributions:" >&2
+        list_available_distros | sed 's/^/  - /' >&2
+        exit 1
+    fi
+
+    # Source the config
+    # shellcheck disable=SC1090
+    . "$conf"
+
+    # Default fallbacks if omitted from config
+    ROOTFS_PATH="${ROOTFS_PATH:-$BASE_DIR/$name}"
+    DEFAULT_SHELLS="${DEFAULT_SHELLS:-/bin/sh}"
+    DNS_SERVERS="${DNS_SERVERS:-1.1.1.1 8.8.8.8}"
+    ENABLE_CORE_MOUNTS="${ENABLE_CORE_MOUNTS:-1}"
+    ENABLE_SHM="${ENABLE_SHM:-1}"
+    ENABLE_DEVPTS="${ENABLE_DEVPTS:-1}"
+    ENABLE_SDCARD="${ENABLE_SDCARD:-1}"
+    ENV_HOME="${ENV_HOME:-/root}"
+    ENV_TERM="${ENV_TERM:-xterm-256color}"
+    ENV_PATH="${ENV_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+}
+
+do_mount() {
+    local target="$ROOTFS_PATH"
+
+    if [ "$ENABLE_CORE_MOUNTS" = "1" ]; then
+        mkdir -p "$target/dev" "$target/proc" "$target/sys"
+        mountpoint -q "$target/dev" || mount --bind /dev "$target/dev"
+        mountpoint -q "$target/proc" || mount -t proc proc "$target/proc"
+        mountpoint -q "$target/sys" || mount -t sysfs sysfs "$target/sys"
+    fi
+
+    if [ "$ENABLE_DEVPTS" = "1" ]; then
+        mkdir -p "$target/dev/pts"
+        mountpoint -q "$target/dev/pts" || mount --bind /dev/pts "$target/dev/pts"
+    fi
+
+    if [ "$ENABLE_SHM" = "1" ]; then
+        mkdir -p "$target/dev/shm"
+        mountpoint -q "$target/dev/shm" || mount -t tmpfs -o rw,nosuid,nodev tmpfs "$target/dev/shm" 2>/dev/null || true
+    fi
+
+    if [ "$ENABLE_SDCARD" = "1" ]; then
+        mkdir -p "$target/sdcard"
+        mountpoint -q "$target/sdcard" || mount --bind /sdcard "$target/sdcard" 2>/dev/null || true
+    fi
+
+    # Mount custom arbitrary bind mounts
+    if [ -n "$EXTRA_MOUNTS" ]; then
+        for pair in $EXTRA_MOUNTS; do
+            host_m="$(echo "$pair" | cut -d: -f1)"
+            target_m="$(echo "$pair" | cut -d: -f2)"
+            if [ -n "$host_m" ] && [ -n "$target_m" ] && [ -d "$host_m" ]; then
+                mkdir -p "$target/$target_m"
+                mountpoint -q "$target/$target_m" || mount --bind "$host_m" "$target/$target_m" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    # Sync DNS
+    if [ -n "$DNS_SERVERS" ]; then
+        mkdir -p "$target/etc"
+        : > "$target/etc/resolv.conf"
+        for dns in $DNS_SERVERS; do
+            echo "nameserver $dns" >> "$target/etc/resolv.conf"
+        done
+    fi
+
+    # Inject Android AID network groups for paranoid network kernels
+    if [ -f "$target/etc/group" ]; then
+        grep -q "^aid_inet:" "$target/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$target/etc/group"
+        grep -q "^aid_net_raw:" "$target/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$target/etc/group"
+        grep -q "^aid_admin:" "$target/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$target/etc/group"
+    fi
+}
+
+do_unmount() {
+    local target="$ROOTFS_PATH"
+
+    # Unmount custom extra mounts in reverse
+    if [ -n "$EXTRA_MOUNTS" ]; then
+        for pair in $EXTRA_MOUNTS; do
+            target_m="$(echo "$pair" | cut -d: -f2)"
+            [ -n "$target_m" ] && umount -f "$target/$target_m" 2>/dev/null || true
+        done
+    fi
+
+    umount -f "$target/sdcard" 2>/dev/null || true
+    umount -f "$target/dev/shm" 2>/dev/null || true
+    umount -f "$target/dev/pts" 2>/dev/null || true
+    umount -f "$target/dev" 2>/dev/null || true
+    umount -f "$target/proc" 2>/dev/null || true
+    umount -f "$target/sys" 2>/dev/null || true
+}
+
+count_mounts() {
+    local target="$1"
+    mount | grep -F " on $target" | wc -l
+}
+
+resolve_shell() {
+    local target="$ROOTFS_PATH"
+    for s in $DEFAULT_SHELLS; do
+        if [ -x "$target$s" ] || [ -L "$target$s" ]; then
+            # Verify shell can actually execute inside chroot
+            if chroot "$target" "$s" -c 'exit 0' 2>/dev/null; then
+                echo "$s"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+case "$ACTION" in
+    run)
+        DISTRO="$1"
+        shift || true
+        load_distro_config "$DISTRO"
+
+        if [ ! -d "$ROOTFS_PATH" ]; then
+            echo "[!] Error: Rootfs directory for '$DISTRO' does not exist at $ROOTFS_PATH." >&2
+            echo "    Install it using: chroot-install $DISTRO" >&2
+            exit 1
+        fi
+
+        # Mount filesystems
+        do_mount
+
+        # Resolve shell
+        SHELL_BIN="$(resolve_shell)" || {
+            echo "[!] Error: No configured shell found in $ROOTFS_PATH!" >&2
+            echo "    Expected one of: $DEFAULT_SHELLS" >&2
+            exit 1
+        }
+
+        # Execution dispatch
+        if [ $# -gt 0 ]; then
+            exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
+                HOME="$ENV_HOME" \
+                TERM="$ENV_TERM" \
+                SHELL="$SHELL_BIN" \
+                PATH="$ENV_PATH" \
+                "$SHELL_BIN" "$@"
+        else
+            exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
+                HOME="$ENV_HOME" \
+                TERM="$ENV_TERM" \
+                SHELL="$SHELL_BIN" \
+                PATH="$ENV_PATH" \
+                "$SHELL_BIN" -l
+        fi
+        ;;
+
+    stop)
+        DISTRO="$1"
+        shift || true
+        load_distro_config "$DISTRO"
+
+        echo "[*] Unmounting $DISTRO chroot at $ROOTFS_PATH..."
+        do_unmount
+        echo "[+] $DISTRO filesystems unmounted cleanly."
+        ;;
+
+    status)
+        DISTRO="$1"
+        if [ -n "$DISTRO" ]; then
+            load_distro_config "$DISTRO"
+            echo "=== Distribution: $DISTRO_NAME ==="
+            echo " Description : $DISTRO_DESCRIPTION"
+            echo " Rootfs Path : $ROOTFS_PATH"
+            if [ -d "$ROOTFS_PATH" ]; then
+                echo " Installed   : YES"
+                m_count="$(count_mounts "$ROOTFS_PATH")"
+                echo " Active Mounts: $m_count"
+                if [ "$m_count" -gt 0 ]; then
+                    echo " State       : ACTIVE"
+                else
+                    echo " State       : INACTIVE"
+                fi
+            else
+                echo " Installed   : NO"
+                echo " State       : NOT INSTALLED"
+            fi
+        else
+            echo "=== Multi-Distro Chroot Status ==="
+            printf "%-12s %-12s %-10s %s\n" "DISTRO" "STATUS" "MOUNTS" "ROOTFS"
+            echo "------------------------------------------------------------"
+            for d in $(list_available_distros); do
+                load_distro_config "$d"
+                if [ -d "$ROOTFS_PATH" ]; then
+                    m_count="$(count_mounts "$ROOTFS_PATH")"
+                    if [ "$m_count" -gt 0 ]; then
+                        st="ACTIVE"
+                    else
+                        st="INACTIVE"
+                    fi
+                else
+                    st="MISSING"
+                    m_count="0"
+                fi
+                printf "%-12s %-12s %-10s %s\n" "$d" "$st" "$m_count" "$ROOTFS_PATH"
+            done
+        fi
+        ;;
+
+    *)
+        echo "Usage: chroot-helper <run|stop|status> <distro> [command...]" >&2
+        echo "Available distributions:" >&2
+        list_available_distros | sed 's/^/  - /' >&2
+        exit 1
+        ;;
+esac

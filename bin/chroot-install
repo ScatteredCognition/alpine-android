@@ -1,0 +1,92 @@
+#!/system/bin/sh
+# ==============================================================================
+# chroot-install - Unified distribution installer using installer plugins
+# Usage: chroot-install [-f|--force] <distro>
+# ==============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+DISTROS_DIR="$BASE_DIR/distros"
+UTILS_DIR="$BASE_DIR/utils"
+
+# Auto-add bundled utils to PATH if available
+[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
+
+# Auto-escalate via su-helper if not running as root
+if [ "$(id -u)" -ne 0 ]; then
+    if [ -x "$SCRIPT_DIR/su-helper" ]; then
+        exec "$SCRIPT_DIR/su-helper" "$0" "$@"
+    else
+        echo "[!] Error: Root required. $SCRIPT_DIR/su-helper not found." >&2
+        exit 1
+    fi
+fi
+
+FORCE_CLEAN=0
+DISTRO=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--force)
+            FORCE_CLEAN=1
+            shift
+            ;;
+        *)
+            if [ -z "$DISTRO" ]; then
+                DISTRO="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$DISTRO" ]; then
+    echo "Usage: chroot-install [-f|--force] <distro>" >&2
+    echo "Available distributions:" >&2
+    if [ -d "$DISTROS_DIR" ]; then
+        for f in "$DISTROS_DIR"/*.conf; do
+            [ -f "$f" ] && basename "$f" .conf | sed 's/^/  - /' >&2
+        done
+    fi
+    exit 1
+fi
+
+CONF="$DISTROS_DIR/$DISTRO.conf"
+PLUGIN="$DISTROS_DIR/$DISTRO.install.sh"
+
+if [ ! -f "$CONF" ]; then
+    echo "[!] Error: No configuration found for distro '$DISTRO' at $CONF" >&2
+    exit 1
+fi
+
+if [ ! -f "$PLUGIN" ]; then
+    echo "[!] Error: No installer plugin found for distro '$DISTRO' at $PLUGIN" >&2
+    exit 1
+fi
+
+# Load config to get target path
+# shellcheck disable=SC1090
+. "$CONF"
+ROOTFS_PATH="${ROOTFS_PATH:-$BASE_DIR/$DISTRO}"
+
+if [ -d "$ROOTFS_PATH" ] && [ "$FORCE_CLEAN" != "1" ]; then
+    echo "[!] Error: Target directory $ROOTFS_PATH already exists!" >&2
+    echo "    Use -f or --force to wipe and reinstall." >&2
+    exit 1
+fi
+
+# Run installer plugin
+# shellcheck disable=SC1090
+. "$PLUGIN"
+install_distro "$ROOTFS_PATH" "$FORCE_CLEAN"
+
+# Ensure permissions on binaries
+chmod 755 "$SCRIPT_DIR"/* 2>/dev/null || true
+
+echo "------------------------------------------------------------"
+echo "[✓] Installation complete! You can run it now with:"
+echo "    chroot-run $DISTRO"
+[ "$DISTRO" = "alpine" ] && echo "    or simply: alpine"
+echo "------------------------------------------------------------"

@@ -45,9 +45,11 @@ Flash directly from custom recovery — completely standalone and lives "off the
 3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI, terminal `twrp install`, or `adb sideload`).
 4. **What the recovery installer does**:
    - Extracts Alpine `edge` (rolling) rootfs into `/data/chroot/alpine`.
+   - Deploys the modular command suite into `/data/chroot/bin/` (`su-helper`, `chroot-helper`, `chroot-run`, `chroot-stop`, `chroot-status`, `chroot-install`, and `alpine`).
+   - Installs distro definitions into `/data/chroot/distros/` (`alpine.conf`, `alpine.install.sh`).
+   - Installs static standalone networking utilities into `/data/chroot/utils/` (`curl`, `busybox`).
    - Sets up `/etc/resolv.conf`, `edge` apk repositories, and Android AID network groups.
-   - Installs standalone launchers directly at `/data/chroot/alpine`, `/data/chroot/enter-alpine.sh`, and `/data/chroot/stop-alpine.sh`.
-   - Optionally registers a `/data/adb/modules/alpine` overlay only if KernelSU/Magisk modules directory exists.
+   - Optionally registers a `/data/adb/modules/chroot` overlay only if KernelSU/Magisk modules directory exists.
 5. Reboot to Android!
 
 ---
@@ -60,86 +62,59 @@ From a root terminal on your device (`su` or `adb shell`):
 su -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
 ```
 
-To perform a clean installation (safely unmounting and purging any broken or existing chroot first):
+To perform a clean installation (safely unmounting and purging any previous chroot first):
 ```bash
-su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh -s -- --clean"
+su -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh -s -- --clean"
 ```
 
 ---
 
-### Method 3: Manual Clone & Install
+## 💻 Usage & Command Suite
 
+Commands reside in `/data/chroot/bin/` (and are overlaid globally into `/system/bin` if Magisk/KernelSU is used):
+
+### 1. Dedicated Shortcut: `alpine`
+Launch directly into Alpine Linux:
 ```bash
-# Push or clone repository onto the device
-git clone https://github.com/faeizmahrus/alpine-android.git /data/local/tmp/alpine-android
-cd /data/local/tmp/alpine-android
-
-# Standard install (default: /data/chroot/alpine, rolling edge branch)
-su -mm -c "sh scripts/install-alpine.sh"
-
-# Or clean install from scratch (wipes any existing chroot cleanly)
-su -mm -c "sh scripts/install-alpine.sh --clean"
-```
-
-The script will automatically:
-1. Safely unmount active mountpoints (`/dev`, `/proc`, `/sys`, `/sdcard`) and purge previous files if `--clean` is passed.
-2. Resolve and download the latest official Alpine Linux `edge` (rolling) `aarch64` minirootfs.
-3. Extract it into `/data/chroot/alpine`.
-4. Configure public DNS resolvers (`1.1.1.1` and `8.8.8.8`).
-5. Configure `edge/main` and `edge/community` apk repositories.
-6. Inject Android AID network groups into `/etc/group` so network sockets function properly.
-7. Create `/data/chroot/enter-alpine.sh` and `/data/chroot/stop-alpine.sh`.
-8. Symlink `alpine`, `enter-alpine`, and `stop-alpine` into `$PATH` (KernelSU/Magisk modules).
-
----
-
-## 💻 Usage
-
-### 1. Enter Alpine Linux
-
-```bash
-# Using the launcher directly:
-/data/chroot/enter-alpine.sh
-
-# Or (if using an alias or overlaid into PATH):
+# Interactive login shell:
 alpine
+# Or direct command execution:
+alpine -c "apk update && apk upgrade"
+alpine -c "htop"
+```
+
+### 2. Universal Runner: `chroot-run <distro> [command...]`
+Run any configured distribution:
+```bash
+chroot-run alpine
+chroot-run alpine -c "uname -a"
+```
+
+### 3. Stop / Unmount: `chroot-stop <distro>`
+Cleanly unmount all active filesystems for a distribution:
+```bash
+chroot-stop alpine
+```
+
+### 4. Status Inspection: `chroot-status [distro]`
+View active mounts, installation states, and running status:
+```bash
+chroot-status
+chroot-status alpine
+```
+
+### 5. Install Distros: `chroot-install [-f|--force] <distro>`
+Install or reinstall distributions via their installer plugin:
+```bash
+chroot-install alpine
+chroot-install --force alpine
 ```
 
 > [!TIP]
-> To run `alpine` from any shell without modifying your system, add this alias to your `~/.bashrc`, `~/.zshrc`, or Termux `~/.bash_profile`:
+> If not using a KernelSU/Magisk module, add `/data/chroot/bin` to your `$PATH` or add aliases in `~/.bashrc`, `~/.zshrc`, or Termux `~/.bash_profile`:
 > ```bash
-> alias alpine="/data/chroot/enter-alpine.sh"
-> alias stop-alpine="/data/chroot/stop-alpine.sh"
+> export PATH="/data/chroot/bin:$PATH"
 > ```
-
-You will be dropped into your Alpine shell:
-```text
-root@localhost:~#
-```
-
-### 2. Execute Single Commands from Android
-You can run any command inside Alpine without keeping an interactive session open:
-
-```bash
-/data/chroot/enter-alpine.sh -c "apk update && apk upgrade"
-/data/chroot/enter-alpine.sh -c "python3 script.py"
-/data/chroot/enter-alpine.sh -c "htop"
-```
-
-### 3. Access Android Storage Inside Alpine
-Your phone's internal storage (`/sdcard`) is automatically bind-mounted inside Alpine:
-```bash
-ls /sdcard
-ls /sdcard/Download
-```
-
-### 4. Exit & Cleanly Unmount
-- To exit the Alpine shell back to Android: type `exit`.
-- To cleanly unmount all Alpine filesystems (`/dev`, `/proc`, `/sys`, `/sdcard`):
-  ```bash
-  /data/chroot/stop-alpine.sh
-  # Or: stop-alpine (if in PATH)
-  ```
 
 ---
 

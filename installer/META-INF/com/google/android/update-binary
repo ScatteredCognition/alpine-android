@@ -60,9 +60,15 @@ else
     ui_print "[!] Error: unzip command missing in recovery environment"; exit 1;
 fi
 
-# 3. Extract bundled static utilities (curl, busybox)
-ui_print "- Installing static utilities (curl, busybox) to $INSTALL_BASE/utils..."
-mkdir -p "$INSTALL_BASE/utils"
+# 3. Extract modular helpers (bin/), configs (distros/), and utilities (utils/)
+ui_print "- Installing modular helpers and distribution configurations..."
+mkdir -p "$INSTALL_BASE/bin" "$INSTALL_BASE/distros" "$INSTALL_BASE/utils"
+
+if unzip -l "$ZIPFILE" | grep -q "bin/chroot-helper"; then
+    unzip -o "$ZIPFILE" "bin/*" "distros/*" -d "$INSTALL_BASE" 2>/dev/null || true
+    chmod 755 "$INSTALL_BASE/bin/"* "$INSTALL_BASE/distros/"*.install.sh 2>/dev/null || true
+fi
+
 if unzip -l "$ZIPFILE" | grep -q "utils/curl"; then
     unzip -oj "$ZIPFILE" "utils/curl" "utils/busybox" -d "$INSTALL_BASE/utils" 2>/dev/null || true
     chmod 755 "$INSTALL_BASE/utils/"* 2>/dev/null || true
@@ -91,136 +97,41 @@ grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3
 # 7. Create mount target folders
 mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
 
-# 8. Generate enter-alpine.sh launcher
-ui_print "- Installing launcher at $INSTALL_BASE/enter-alpine.sh..."
-cat << 'EOF' > "$INSTALL_BASE/enter-alpine.sh"
-#!/system/bin/sh
-CHROOT_DIR="/data/chroot/alpine"
-INSTALL_BASE="/data/chroot"
-[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
+# 8. Clean up any obsolete root scripts
+rm -f "$INSTALL_BASE/enter-alpine.sh" "$INSTALL_BASE/stop-alpine.sh" "$INSTALL_BASE/alpine" 2>/dev/null || true
 
-if [ "$(id -u)" -ne 0 ]; then
-    if ! command -v su >/dev/null 2>&1; then
-        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
-        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
-        exit 1
-    fi
-    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
-fi
-
-# Allow overriding chroot directory with -d or --dir
-if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
-    CHROOT_DIR="$2"
-    shift 2
-fi
-
-# Idempotent mounts
-mountpoint -q "$CHROOT_DIR/dev" || mount --bind /dev "$CHROOT_DIR/dev"
-mountpoint -q "$CHROOT_DIR/dev/pts" || mount --bind /dev/pts "$CHROOT_DIR/dev/pts"
-mountpoint -q "$CHROOT_DIR/proc" || mount -t proc proc "$CHROOT_DIR/proc"
-mountpoint -q "$CHROOT_DIR/sys" || mount -t sysfs sysfs "$CHROOT_DIR/sys"
-
-# POSIX shared memory (tmpfs)
-mkdir -p "$CHROOT_DIR/dev/shm" 2>/dev/null || true
-mountpoint -q "$CHROOT_DIR/dev/shm" || mount -t tmpfs -o rw,nosuid,nodev tmpfs "$CHROOT_DIR/dev/shm" 2>/dev/null || true
-
-# Storage bridge
-mkdir -p "$CHROOT_DIR/sdcard" 2>/dev/null || true
-mountpoint -q "$CHROOT_DIR/sdcard" || mount --bind /sdcard "$CHROOT_DIR/sdcard" 2>/dev/null || true
-
-# DNS
-echo "nameserver 1.1.1.1" > "$CHROOT_DIR/etc/resolv.conf"
-echo "nameserver 8.8.8.8" >> "$CHROOT_DIR/etc/resolv.conf"
-
-# Shell detection
-LOGIN_SHELL="/usr/bin/fish"
-[ ! -x "$CHROOT_DIR$LOGIN_SHELL" ] && LOGIN_SHELL="/bin/bash"
-[ ! -x "$CHROOT_DIR$LOGIN_SHELL" ] && LOGIN_SHELL="/bin/sh"
-
-# Execution dispatch
-if [ $# -gt 0 ]; then
-    exec chroot "$CHROOT_DIR" /usr/bin/env -i \
-        HOME=/root \
-        TERM=xterm-256color \
-        SHELL="$LOGIN_SHELL" \
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-        "$LOGIN_SHELL" "$@"
-else
-    exec chroot "$CHROOT_DIR" /usr/bin/env -i \
-        HOME=/root \
-        TERM=xterm-256color \
-        SHELL="$LOGIN_SHELL" \
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-        "$LOGIN_SHELL" -l
-fi
-EOF
-
-chmod 755 "$INSTALL_BASE/enter-alpine.sh"
-
-# 9. Generate stop-alpine.sh
-cat << 'EOF' > "$INSTALL_BASE/stop-alpine.sh"
-#!/system/bin/sh
-CHROOT_DIR="/data/chroot/alpine"
-INSTALL_BASE="/data/chroot"
-[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
-
-if [ "$(id -u)" -ne 0 ]; then
-    if ! command -v su >/dev/null 2>&1; then
-        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
-        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
-        exit 1
-    fi
-    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
-fi
-
-# Allow overriding chroot directory with -d/--dir or positional argument
-if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
-    CHROOT_DIR="$2"
-    shift 2
-elif [ -n "$1" ]; then
-    CHROOT_DIR="$1"
-    shift
-fi
-
-umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
-umount -f "$CHROOT_DIR/dev/shm" 2>/dev/null || true
-umount -f "$CHROOT_DIR/dev/pts" 2>/dev/null || true
-umount -f "$CHROOT_DIR/dev" 2>/dev/null || true
-umount -f "$CHROOT_DIR/proc" 2>/dev/null || true
-umount -f "$CHROOT_DIR/sys" 2>/dev/null || true
-
-echo "[+] Alpine unmounted cleanly."
-EOF
-
-chmod 755 "$INSTALL_BASE/stop-alpine.sh"
-
-# 10. Optional: Register KernelSU/Magisk module if modules directory exists
+# 9. Optional: Register KernelSU/Magisk module if modules directory exists
 if [ -d /data/adb/modules ]; then
-    ui_print "- Registering KernelSU/Magisk overlay module..."
-    MOD_DIR="/data/adb/modules/alpine"
+    ui_print "- Registering KernelSU/Magisk overlay module (id: chroot)..."
+    # Clean up obsolete alpine module if present
+    rm -rf /data/adb/modules/alpine 2>/dev/null || true
+
+    MOD_DIR="/data/adb/modules/chroot"
     mkdir -p "$MOD_DIR/system/bin"
     
     cat << 'EOF' > "$MOD_DIR/module.prop"
-id=alpine
-name=Alpine Linux (edge) Chroot
+id=chroot
+name=Multi-Distro Linux Chroot for Android
 version=rolling-edge
-versionCode=2
+versionCode=3
 author=Faeiz Mahrus (built with Antigravity)
-description=Universal /system/bin launcher overlay for Alpine Linux (edge) Chroot.
+description=Universal /system/bin command suite (alpine, chroot-run, chroot-stop, chroot-status, chroot-install) for native Android chroots.
 EOF
     
-    ln -sf "$INSTALL_BASE/enter-alpine.sh" "$MOD_DIR/system/bin/alpine"
-    ln -sf "$INSTALL_BASE/enter-alpine.sh" "$MOD_DIR/system/bin/enter-alpine"
-    ln -sf "$INSTALL_BASE/stop-alpine.sh" "$MOD_DIR/system/bin/stop-alpine"
+    ln -sf "$INSTALL_BASE/bin/alpine" "$MOD_DIR/system/bin/alpine"
+    ln -sf "$INSTALL_BASE/bin/chroot-run" "$MOD_DIR/system/bin/chroot-run"
+    ln -sf "$INSTALL_BASE/bin/chroot-stop" "$MOD_DIR/system/bin/chroot-stop"
+    ln -sf "$INSTALL_BASE/bin/chroot-status" "$MOD_DIR/system/bin/chroot-status"
+    ln -sf "$INSTALL_BASE/bin/chroot-install" "$MOD_DIR/system/bin/chroot-install"
     
     chmod -R 755 "$MOD_DIR"
     chcon -h u:object_r:system_file:s0 "$MOD_DIR/system/bin/"* 2>/dev/null || true
-    ui_print "  -> Overlaid to /system/bin/alpine"
+    ui_print "  -> Overlaid commands into /system/bin/"
 fi
 
 ui_print "*****************************************"
 ui_print "  Installation Complete!                 "
-ui_print "  Run: /data/chroot/enter-alpine.sh      "
+ui_print "  Run: /data/chroot/bin/alpine           "
 ui_print "  (or 'alpine' if overlaid into PATH)    "
 ui_print "*****************************************"
 exit 0

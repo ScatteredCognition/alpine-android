@@ -1,0 +1,24 @@
+#!/system/bin/sh
+# ==============================================================================
+# su-helper - Standalone root verification and privilege escalation wrapper
+# ==============================================================================
+
+if [ $# -eq 0 ]; then
+    echo "Usage: su-helper <command> [args...]" >&2
+    exit 1
+fi
+
+# If already root, execute command directly
+if [ "$(id -u)" -eq 0 ]; then
+    exec "$@"
+fi
+
+# Ensure su exists
+if ! command -v su >/dev/null 2>&1; then
+    echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+    echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+    exit 1
+fi
+
+# Try su -mm first (global mount namespace), fall back to standard su -c
+exec su -mm -c "$@" 2>/dev/null || exec su -c "$@"

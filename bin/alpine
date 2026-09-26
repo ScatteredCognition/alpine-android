@@ -1,0 +1,8 @@
+#!/system/bin/sh
+# ==============================================================================
+# alpine - Dedicated launcher shortcut for Alpine Linux chroot
+# Usage: alpine [command...]
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/chroot-run" alpine "$@"

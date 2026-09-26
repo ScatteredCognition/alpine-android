@@ -1,0 +1,8 @@
+#!/system/bin/sh
+# ==============================================================================
+# chroot-stop - Unmount active filesystems for a distribution
+# Usage: chroot-stop <distro>
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/chroot-helper" stop "$@"

@@ -1,0 +1,8 @@
+#!/system/bin/sh
+# ==============================================================================
+# chroot-run - Shortcut runner for chroot distributions
+# Usage: chroot-run <distro> [command...]
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/chroot-helper" run "$@"
