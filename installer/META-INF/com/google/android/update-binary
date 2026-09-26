@@ -60,34 +60,44 @@ else
     ui_print "[!] Error: unzip command missing in recovery environment"; exit 1;
 fi
 
-# 3. Setup DNS
+# 3. Extract bundled static utilities (curl, busybox)
+ui_print "- Installing static utilities (curl, busybox) to $INSTALL_BASE/utils..."
+mkdir -p "$INSTALL_BASE/utils"
+if unzip -l "$ZIPFILE" | grep -q "utils/curl"; then
+    unzip -oj "$ZIPFILE" "utils/curl" "utils/busybox" -d "$INSTALL_BASE/utils" 2>/dev/null || true
+    chmod 755 "$INSTALL_BASE/utils/"* 2>/dev/null || true
+fi
+
+# 4. Setup DNS
 ui_print "- Setting up DNS configuration..."
 cat << 'EOF' > "$CHROOT_DIR/etc/resolv.conf"
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
 
-# 4. Configure edge repositories (main + community)
+# 5. Configure edge repositories (main + community)
 ui_print "- Configuring edge package repositories..."
 cat << 'EOF' > "$CHROOT_DIR/etc/apk/repositories"
 https://dl-cdn.alpinelinux.org/alpine/edge/main
 https://dl-cdn.alpinelinux.org/alpine/edge/community
 EOF
 
-# 5. Inject Android AID network groups
+# 6. Inject Android AID network groups
 ui_print "- Configuring Android network AID GIDs..."
 grep -q "^aid_inet:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$CHROOT_DIR/etc/group"
 grep -q "^aid_net_raw:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$CHROOT_DIR/etc/group"
 grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$CHROOT_DIR/etc/group"
 
-# 6. Create mount target folders
+# 7. Create mount target folders
 mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
 
-# 7. Generate enter-alpine.sh launcher
+# 8. Generate enter-alpine.sh launcher
 ui_print "- Installing launcher at $INSTALL_BASE/enter-alpine.sh..."
 cat << 'EOF' > "$INSTALL_BASE/enter-alpine.sh"
 #!/system/bin/sh
 CHROOT_DIR="/data/chroot/alpine"
+INSTALL_BASE="/data/chroot"
+[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
 
 if [ "$(id -u)" -ne 0 ]; then
     if ! command -v su >/dev/null 2>&1; then
@@ -147,10 +157,12 @@ EOF
 
 chmod 755 "$INSTALL_BASE/enter-alpine.sh"
 
-# 8. Generate stop-alpine.sh
+# 9. Generate stop-alpine.sh
 cat << 'EOF' > "$INSTALL_BASE/stop-alpine.sh"
 #!/system/bin/sh
 CHROOT_DIR="/data/chroot/alpine"
+INSTALL_BASE="/data/chroot"
+[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
 
 if [ "$(id -u)" -ne 0 ]; then
     if ! command -v su >/dev/null 2>&1; then
@@ -182,7 +194,7 @@ EOF
 
 chmod 755 "$INSTALL_BASE/stop-alpine.sh"
 
-# 9. Optional: Register KernelSU/Magisk module if modules directory exists
+# 10. Optional: Register KernelSU/Magisk module if modules directory exists
 if [ -d /data/adb/modules ]; then
     ui_print "- Registering KernelSU/Magisk overlay module..."
     MOD_DIR="/data/adb/modules/alpine"
@@ -193,7 +205,7 @@ id=alpine
 name=Alpine Linux (edge) Chroot
 version=rolling-edge
 versionCode=2
-author=Faeiz Mahrus
+author=Faeiz Mahrus (built with Antigravity)
 description=Universal /system/bin launcher overlay for Alpine Linux (edge) Chroot.
 EOF
     

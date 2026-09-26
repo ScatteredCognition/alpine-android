@@ -230,6 +230,18 @@ This strips the Android environment completely and supplies only pure, clean POS
 ### 5. Idempotent Mount Plumbing
 The launcher uses `mountpoint -q` checks before every bind-mount. Multiple terminal tabs or SSH sessions can safely invoke `alpine` simultaneously without triggering duplicate or recursive mount errors.
 
+### 6. Bundled Static Utilities (`/data/chroot/utils`)
+Stock Android ROMs lack standard networking and archive tools (`curl`, `wget`, `tar` options). To ensure 100% self-reliance regardless of host toolchains:
+- Statically linked `curl` and multi-call `busybox` (with `wget`, `tar`, `gzip`, etc.) are bundled and installed to `/data/chroot/utils`.
+- The launchers (`enter-alpine.sh` and `stop-alpine.sh`) automatically add `/data/chroot/utils` to `$PATH`, ensuring reliable tooling on any bare-metal Android installation.
+
+---
+
+## 👨‍💻 Authors & Attributions
+
+- **Author**: Faeiz Mahrus
+- **AI Pair Programmer**: Developed and architected with **Google Antigravity**
+
 ---
 
 ## 📄 License

@@ -33,12 +33,18 @@ curl -sL -o "$WORK_DIR/rootfs.tar.gz" "$URL"
 # Ensure permissions
 chmod 755 "$WORK_DIR/META-INF/com/google/android/update-binary"
 
+# Copy utils into installer package if present
+mkdir -p "$WORK_DIR/utils"
+[ -d "$SCRIPT_DIR/utils" ] && cp -rf "$SCRIPT_DIR/utils/"* "$WORK_DIR/utils/"
+chmod 755 "$WORK_DIR/utils/"* 2>/dev/null || true
+
 # Create ZIP
 echo "[*] Packaging flashable recovery ZIP..."
 rm -f "$OUTPUT_ZIP"
 cd "$WORK_DIR"
-zip -r9 "$OUTPUT_ZIP" META-INF rootfs.tar.gz
+zip -r9 "$OUTPUT_ZIP" META-INF rootfs.tar.gz utils
 rm -f "$WORK_DIR/rootfs.tar.gz"
+rm -rf "$WORK_DIR/utils"
 
 echo "---------------------------------------------"
 echo "[✓] Flashable ZIP created successfully!"

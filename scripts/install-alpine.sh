@@ -121,12 +121,23 @@ grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3
 # 9. Create mount target folders
 mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
 
-# 10. Generate enter-alpine.sh launcher
+# 10. Install bundled static utilities (curl, busybox) if available locally
+UTILS_SRC="$(dirname "$0")/../utils"
+mkdir -p "$INSTALL_BASE/utils"
+if [ -d "$UTILS_SRC" ]; then
+    echo "[*] Installing static utilities (curl, busybox) to $INSTALL_BASE/utils..."
+    cp -rf "$UTILS_SRC/"* "$INSTALL_BASE/utils/" 2>/dev/null || true
+    chmod 755 "$INSTALL_BASE/utils/"* 2>/dev/null || true
+fi
+
+# 11. Generate enter-alpine.sh launcher
 LAUNCHER="$INSTALL_BASE/enter-alpine.sh"
 echo "[*] Writing launcher script to $LAUNCHER..."
 cat << 'EOF' > "$LAUNCHER"
 #!/system/bin/sh
 CHROOT_DIR="__CHROOT_DIR__"
+INSTALL_BASE="$(dirname "$CHROOT_DIR")"
+[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
 
 # Ensure global mount namespace
 if [ "$(id -u)" -ne 0 ]; then
@@ -188,12 +199,14 @@ EOF
 sed -i "s|__CHROOT_DIR__|$CHROOT_DIR|g" "$LAUNCHER"
 chmod 755 "$LAUNCHER"
 
-# 11. Generate stop-alpine.sh unmount script
+# 12. Generate stop-alpine.sh unmount script
 STOP_SCRIPT="$INSTALL_BASE/stop-alpine.sh"
 echo "[*] Writing unmount script to $STOP_SCRIPT..."
 cat << 'EOF' > "$STOP_SCRIPT"
 #!/system/bin/sh
 CHROOT_DIR="__CHROOT_DIR__"
+INSTALL_BASE="$(dirname "$CHROOT_DIR")"
+[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
 
 if [ "$(id -u)" -ne 0 ]; then
     if ! command -v su >/dev/null 2>&1; then
@@ -226,7 +239,7 @@ EOF
 sed -i "s|__CHROOT_DIR__|$CHROOT_DIR|g" "$STOP_SCRIPT"
 chmod 755 "$STOP_SCRIPT"
 
-# 12. Optional convenience: Register Magisk/KernelSU overlay if modules directory exists
+# 13. Optional convenience: Register Magisk/KernelSU overlay if modules directory exists
 if [ -d /data/adb/modules ]; then
     MOD_DIR="/data/adb/modules/alpine"
     mkdir -p "$MOD_DIR/system/bin"
@@ -235,7 +248,7 @@ id=alpine
 name=Alpine Linux (edge) Chroot
 version=rolling-edge
 versionCode=2
-author=Faeiz Mahrus
+author=Faeiz Mahrus (built with Antigravity)
 description=Universal launcher overlay for Alpine Linux Chroot.
 EOF
     ln -sf "$LAUNCHER" "$MOD_DIR/system/bin/alpine" 2>/dev/null || true

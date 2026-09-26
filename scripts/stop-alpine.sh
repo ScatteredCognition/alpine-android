@@ -4,6 +4,8 @@
 # ==============================================================================
 
 CHROOT_DIR="${CHROOT_DIR:-/data/chroot/alpine}"
+INSTALL_BASE="$(dirname "$CHROOT_DIR")"
+[ -d "$INSTALL_BASE/utils" ] && PATH="$INSTALL_BASE/utils:$PATH"
 
 if [ "$(id -u)" -ne 0 ]; then
     if ! command -v su >/dev/null 2>&1; then
