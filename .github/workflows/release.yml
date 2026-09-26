@@ -1,0 +1,60 @@
+name: Build & Release Flashable Recovery ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag / Release version (e.g. v1.0.0 or rolling-edge)'
+        required: true
+        default: 'rolling-edge'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip curl
+
+      - name: Build recovery ZIP
+        run: |
+          chmod +x build-recovery-zip.sh bin/*
+          ./build-recovery-zip.sh
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd out
+          sha256sum alpine-chroot-edge-aarch64-recovery.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Alpine Linux Chroot for Android (${{ steps.vars.outputs.tag }})"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            out/alpine-chroot-edge-aarch64-recovery.zip
+            out/SHA256SUMS.txt

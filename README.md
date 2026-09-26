@@ -36,7 +36,7 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 Flash directly from custom recovery — completely standalone and lives "off the land" without external dependencies:
 
-1. Download or build the recovery flashable zip:
+1. Download the pre-built flashable ZIP from [GitHub Releases](https://github.com/ScatteredCognition/alpine-android/releases), or build it locally:
    ```bash
    ./build-recovery-zip.sh
    # Produces: out/alpine-chroot-edge-aarch64-recovery.zip
