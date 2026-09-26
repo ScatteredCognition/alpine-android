@@ -24,9 +24,13 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 1. **Android Device (ARM64 / `aarch64`)**:
    - Unlocked bootloader with a custom recovery (**OrangeFox** or **TWRP**) OR terminal root access.
 2. **Root (`su`) on Booted Android**:
-   - Working `su` binary (**KernelSU**, **APatch**, **Magisk**, or built-in ROM `su`).
+   - Working `su` binary. Supported root solutions:
+     - [KernelSU](https://kernelsu.org/) / [KernelSU-Next](https://github.com/rifsxd/KernelSU-Next) (Kernel-level root)
+     - [APatch](https://apatch.dev/) (Kernel-patch root)
+     - [Magisk](https://github.com/topjohnwu/Magisk) (Systemless root)
+     - Built-in ROM `su` (e.g. LineageOS `su` addon or userdebug builds).
 3. **Terminal Access**:
-   - [Termux](https://github.com/termux/termux-app/releases), an **ADB root** shell, or local terminal.
+   - [Termux](https://github.com/termux/termux-app/releases), an **ADB root** shell, or a persistent SSH server (such as [MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH)).
 
 ---
 
@@ -160,10 +164,25 @@ DEFAULT_SHELLS="/bin/zsh /usr/bin/fish /bin/bash /bin/sh"
 apk add bash curl nano htop git ca-certificates openssh tmux build-base
 ```
 
-### Running OpenSSH Inside Alpine (Zero Dependencies)
+### Running a Persistent SSH Server
 
-If you want SSH server access without any external Magisk modules or host daemons:
+You can run an SSH server either natively on the Android host (recommended for whole-device administration) or inside the Alpine chroot:
 
+#### Option A: Host-Level Persistent SSH via MagiskSSH (Recommended)
+[MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH) runs an OpenSSH server natively on the Android host across reboots via Magisk, KernelSU, or APatch.
+1. Flash the **MagiskSSH** module via KernelSU / APatch / Magisk app.
+2. Place your PC's public key in `/data/adb/ssh/root/.ssh/authorized_keys` (or set a password).
+3. Connect via port `22`:
+   ```bash
+   ssh root@<PHONE_IP>
+   ```
+4. Once connected to the host shell, launch into the chroot:
+   ```bash
+   /data/chroot/bin/alpine
+   ```
+
+#### Option B: Standalone In-Chroot OpenSSH (Zero Host Dependencies)
+If you prefer running an SSH server directly inside Alpine without host modules:
 ```bash
 # 1. Inside Alpine: install and generate host keys
 apk add openssh
@@ -174,14 +193,14 @@ mkdir -p /root/.ssh
 echo "<your_ssh_public_key>" >> /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 
-# 3. Start SSH server
+# 3. Start SSH daemon (on a non-standard port like 2222)
 /usr/sbin/sshd -p 2222
 ```
-
 Connect from your PC anytime:
 ```bash
 ssh -p 2222 root@<PHONE_IP>
 ```
+To keep in-chroot SSH persistent across reboots, call `/data/chroot/bin/alpine -c "/usr/sbin/sshd -p 2222"` from an init script or Termux:Boot / KernelSU `service.sh`.
 
 ### Creating Non-Root Users Inside Chroot (with Internet Access)
 
