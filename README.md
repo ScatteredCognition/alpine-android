@@ -232,6 +232,80 @@ Stock Android ROMs lack standard networking and archive tools (`curl`, `wget`, `
 
 ---
 
+## Adding New Distributions
+
+This chroot engine is modular and designed to support any Linux distribution (e.g. Debian, Arch, Ubuntu, Fedora). To add a new distribution named `<name>`:
+
+### 1. Create `/data/chroot/distros/<name>.conf`
+
+Define the distribution's configuration variables:
+
+```bash
+DISTRO_NAME="debian"
+DISTRO_DESCRIPTION="Debian GNU/Linux (trixie/sid)"
+
+# Target rootfs directory
+ROOTFS_PATH="/data/chroot/debian"
+
+# Shell resolution hierarchy (checked in order, must fall back to /bin/sh)
+DEFAULT_SHELLS="/bin/bash /bin/sh"
+
+# DNS servers to write into /etc/resolv.conf
+DNS_SERVERS="1.1.1.1 8.8.8.8"
+
+# Mount flags (1 to enable, 0 to disable)
+ENABLE_CORE_MOUNTS=1
+ENABLE_SHM=1
+ENABLE_DEVPTS=1
+ENABLE_SDCARD=1
+
+# Optional extra custom bind mounts: format "HOST_PATH:CHROOT_TARGET" separated by spaces
+EXTRA_MOUNTS=""
+
+# Environment variables supplied to chroot session
+ENV_HOME="/root"
+ENV_TERM="xterm-256color"
+ENV_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+```
+
+### 2. Create `/data/chroot/distros/<name>.install.sh`
+
+Create the installer plugin adhering to the plugin contract:
+- **Contract**: Implement `install_distro <target_directory>`.
+- **Scope**: ONLY fetch/download the rootfs tarball and configure in-chroot files (e.g. package mirrors, initial config).
+- **Environment**: Automatically inherits `$TMP_DIR`, augmented `$PATH` (with `curl` and `busybox`), and helper functions (`safe_download`, `safe_extract`).
+- **Do NOT**: Manage mounts, unmount, purge, or configure DNS/groups — `chroot-install` automatically runs all pre-hooks (safe unmount, zero-mount verification, purge, directory creation) and post-hooks (DNS injection, Android AID network group injection).
+
+Example:
+```bash
+#!/system/bin/sh
+install_distro() {
+    local target="$1"
+    local tarball="$TMP_DIR/debian-rootfs.tar.gz"
+
+    echo "[*] Downloading rootfs..."
+    safe_download "https://example.com/debian-rootfs.tar.gz" "$tarball"
+
+    echo "[*] Extracting..."
+    safe_extract "$tarball" "$target"
+    rm -f "$tarball"
+
+    echo "[✓] Configured debian rootfs."
+}
+```
+
+### 3. Install & Run
+
+Once the `.conf` and `.install.sh` files exist in `distros/`, the new distro is instantly recognized by the command suite:
+```bash
+/data/chroot/bin/chroot-install <name>
+/data/chroot/bin/chroot-run <name>
+/data/chroot/bin/chroot-status <name>
+/data/chroot/bin/chroot-stop <name>
+```
+
+---
+
 ## Authors & Attributions
 
 - **Author**: Faeiz Mahrus

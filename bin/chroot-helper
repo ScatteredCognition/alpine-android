@@ -285,40 +285,21 @@ case "$(basename "$0")" in
                 DISTRO="$1"
                 if [ -n "$DISTRO" ]; then
                     load_distro_config "$DISTRO"
-                    echo "=== Distribution: $DISTRO_NAME ==="
-                    echo " Description : $DISTRO_DESCRIPTION"
-                    echo " Rootfs Path : $ROOTFS_PATH"
                     if [ -d "$ROOTFS_PATH" ]; then
-                        echo " Installed   : YES"
                         m_count="$(count_mounts "$ROOTFS_PATH")"
-                        echo " Active Mounts: $m_count"
-                        if [ "$m_count" -gt 0 ]; then
-                            echo " State       : ACTIVE"
-                        else
-                            echo " State       : INACTIVE"
-                        fi
+                        echo "$DISTRO: installed ($m_count mounts active) -> $ROOTFS_PATH"
                     else
-                        echo " Installed   : NO"
-                        echo " State       : NOT INSTALLED"
+                        echo "$DISTRO: not installed -> $ROOTFS_PATH"
                     fi
                 else
-                    echo "=== Multi-Distro Chroot Status ==="
-                    printf "%-12s %-12s %-10s %s\n" "DISTRO" "STATUS" "MOUNTS" "ROOTFS"
-                    echo "------------------------------------------------------------"
                     for d in $(list_available_distros); do
                         load_distro_config "$d"
                         if [ -d "$ROOTFS_PATH" ]; then
                             m_count="$(count_mounts "$ROOTFS_PATH")"
-                            if [ "$m_count" -gt 0 ]; then
-                                st="ACTIVE"
-                            else
-                                st="INACTIVE"
-                            fi
+                            echo "$d: installed ($m_count mounts) -> $ROOTFS_PATH"
                         else
-                            st="MISSING"
-                            m_count="0"
+                            echo "$d: not installed"
                         fi
-                        printf "%-12s %-12s %-10s %s\n" "$d" "$st" "$m_count" "$ROOTFS_PATH"
                     done
                 fi
                 ;;
