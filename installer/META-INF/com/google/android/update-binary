@@ -119,11 +119,9 @@ author=Faeiz Mahrus (built with Antigravity)
 description=Universal /system/bin command suite (alpine, chroot-run, chroot-stop, chroot-status, chroot-install) for native Android chroots.
 EOF
     
-    ln -sf "$INSTALL_BASE/bin/alpine" "$MOD_DIR/system/bin/alpine"
-    ln -sf "$INSTALL_BASE/bin/chroot-run" "$MOD_DIR/system/bin/chroot-run"
-    ln -sf "$INSTALL_BASE/bin/chroot-stop" "$MOD_DIR/system/bin/chroot-stop"
-    ln -sf "$INSTALL_BASE/bin/chroot-status" "$MOD_DIR/system/bin/chroot-status"
-    ln -sf "$INSTALL_BASE/bin/chroot-install" "$MOD_DIR/system/bin/chroot-install"
+    for b in "$INSTALL_BASE/bin/"*; do
+        [ -f "$b" ] && ln -sf "$b" "$MOD_DIR/system/bin/$(basename "$b")"
+    done
     
     chmod -R 755 "$MOD_DIR"
     chcon -h u:object_r:system_file:s0 "$MOD_DIR/system/bin/"* 2>/dev/null || true
