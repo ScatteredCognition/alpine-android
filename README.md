@@ -54,12 +54,21 @@ Flash directly from custom recovery — completely standalone and lives "off the
 
 ---
 
-### Method 2: Direct Installation from Recovery / Root Terminal
+### Method 2: Manual Terminal Deployment (Root Shell / ADB)
 
-From a recovery shell or root terminal on your device (`su` or `adb shell`):
+If deploying manually without flashing the recovery ZIP:
 
-1. Clone or download this repository onto your device, or copy `out/alpine-chroot-edge-aarch64-recovery.zip`.
-2. From the project directory, run:
+1. Copy or extract the repository's `bin/`, `distros/`, and `utils/` directories directly into `/data/chroot/`:
+   ```bash
+   su
+   mkdir -p /data/chroot
+   cp -r bin distros utils /data/chroot/
+   chmod 755 /data/chroot/bin/*
+   chmod 644 /data/chroot/distros/*
+   [ -d /data/chroot/utils ] && chmod 755 /data/chroot/utils/*
+   ```
+
+2. Run the installer:
    ```bash
    # Standard installation using chroot-install
    /data/chroot/bin/chroot-install alpine
@@ -121,19 +130,21 @@ chroot-install --force alpine
 
 ## Post-Installation & Customization
 
-### Change Default Shell to Fish
+### Shell Selection & Customization
 
-Inside Alpine, install `fish` and the `shadow` suite (which provides `chsh`):
+The active shell is resolved automatically based on the `DEFAULT_SHELLS` hierarchy declared in `/data/chroot/distros/<distro>.conf` (for Alpine, `/data/chroot/distros/alpine.conf` checks `/usr/bin/fish /bin/bash /bin/sh` in order).
 
+To use Fish as your default shell, simply install it inside Alpine:
 ```bash
 apk update
-apk add fish shadow
-
-# Set fish as default login shell for root
-chsh -s /usr/bin/fish root
+apk add fish
 ```
+Once installed, `alpine` (and `chroot-run`) immediately detects `/usr/bin/fish` and launches it automatically without requiring `chsh` or the `shadow` package.
 
-The `alpine` (or `chroot-run`) launcher will automatically detect Fish and launch `/usr/bin/fish -l` by default.
+To customize the search hierarchy or add another shell (e.g. `zsh`), edit `DEFAULT_SHELLS` in `/data/chroot/distros/alpine.conf`:
+```bash
+DEFAULT_SHELLS="/bin/zsh /usr/bin/fish /bin/bash /bin/sh"
+```
 
 ### Recommended Baseline Tools
 
@@ -164,13 +175,13 @@ Connect from your PC anytime:
 ssh -p 2222 root@<PHONE_IP>
 ```
 
-### Creating Non-Root Users (with Internet Access)
+### Creating Non-Root Users Inside Chroot (with Internet Access)
 
-Android restricts raw network sockets to specific Android Group IDs (GIDs). To ensure any non-root users you create can access the internet:
+Android restricts raw network sockets to specific Android Group IDs (GIDs). When creating non-root accounts inside the chroot, assign them to the Android AID networking groups so they can access the network:
 
 ```bash
-# 1. Create the user
-adduser -s /usr/bin/fish user
+# 1. Inside Alpine: create the user
+adduser user
 
 # 2. Add the user to the Android AID networking groups
 addgroup user aid_inet
@@ -188,9 +199,9 @@ Android kernels use `CONFIG_ANDROID_PARANOID_NETWORK`, which blocks standard `so
 - `aid_admin` (GID `3005`): Administrative network management.
 
 ### 2. POSIX Shared Memory (`/dev/shm`) Workaround
-Android does not provide standard POSIX `/dev/shm` (it uses `ashmem` / `dmabuf`), causing modern Linux software (compilers, Python multiprocessing, PostgreSQL) to fail. The launcher automatically mounts a lightweight `tmpfs` directly to `/data/chroot/alpine/dev/shm`:
+Android does not provide standard POSIX `/dev/shm` (it uses `ashmem` / `dmabuf`), causing modern Linux software (compilers, Python multiprocessing, PostgreSQL) to fail. `chroot-helper` automatically mounts a lightweight `tmpfs` directly to `/dev/shm`:
 ```bash
-mount -t tmpfs -o rw,nosuid,nodev tmpfs "$CHROOT_DIR/dev/shm"
+mount -t tmpfs -o rw,nosuid,nodev tmpfs "$ROOTFS_PATH/dev/shm"
 ```
 
 ### 3. Dynamic DNS Synchronization
@@ -199,7 +210,7 @@ Android routes DNS through its internal `netd` daemon and system properties (`ne
 ### 4. Clean Environment Isolation
 Android exports numerous non-POSIX environment variables (`ANDROID_DATA`, `BOOTCLASSPATH`, `LD_PRELOAD`) that can crash Linux binaries. `chroot-helper` uses:
 ```bash
-exec chroot "$ROOTFS_PATH" /usr/bin/env -i HOME=/root TERM=xterm-256color SHELL="$LOGIN_SHELL" PATH=... "$LOGIN_SHELL" -l
+exec chroot "$ROOTFS_PATH" /usr/bin/env -i HOME="$ENV_HOME" TERM="$ENV_TERM" SHELL="$SHELL_BIN" PATH="$ENV_PATH" "$SHELL_BIN" -l
 ```
 This strips the Android environment completely and supplies only pure, clean POSIX variables.
 
