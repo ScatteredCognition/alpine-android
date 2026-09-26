@@ -40,20 +40,21 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 Flash directly from custom recovery — completely standalone and lives "off the land" without external dependencies:
 
-1. Download the pre-built flashable ZIP from [GitHub Releases](https://github.com/ScatteredCognition/alpine-android/releases), or build it locally:
-   ```bash
-   ./build-recovery-zip.sh
-   # Produces: out/alpine-chroot-edge-aarch64-recovery.zip
-   ```
+1. Download the pre-built flashable ZIP from [GitHub Releases](https://github.com/ScatteredCognition/alpine-android/releases), or build it locally (`./build-recovery-zip.sh`).
 2. Reboot into **OrangeFox** or **TWRP Recovery**.
-3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI, terminal `twrp install`, or `adb sideload`).
-4. **What the recovery installer does**:
-   - Extracts Alpine `edge` (rolling) rootfs into `/data/chroot/alpine`.
-   - Deploys the modular command suite into `/data/chroot/bin/` (`su-helper`, `chroot-helper`, `chroot-run`, `chroot-stop`, `chroot-status`, `chroot-install`, and `alpine`).
-   - Installs distro definitions into `/data/chroot/distros/` (`alpine.conf`, `alpine.install.sh`).
-   - Installs static standalone networking utilities into `/data/chroot/utils/` (`curl`, `busybox`).
-   - Sets up `/etc/resolv.conf`, `edge` apk repositories, and Android AID network groups.
-5. Reboot to Android!
+3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI, `twrp install`, or `adb sideload`).
+4. Reboot to Android!
+
+---
+
+### Recovery Installer Deployment Details
+
+When flashed, the recovery installer automatically sets up a fully self-contained environment:
+- **Rootfs Deployment**: Extracts Alpine `edge` (rolling) minirootfs into `/data/chroot/alpine`.
+- **Command Suite**: Installs all management executables into `/data/chroot/bin/` (`alpine`, `chroot-run`, `chroot-stop`, `chroot-status`, `chroot-install`, `chroot-helper`, `su-helper`).
+- **Distribution Profiles**: Deploys declarative config and installation plugins to `/data/chroot/distros/` (`alpine.conf`, `alpine.install.sh`).
+- **Static Utilities**: Installs bundled, statically linked fallback binaries into `/data/chroot/utils/` (`curl`, `busybox`).
+- **System Integration**: Configures `/etc/resolv.conf`, Alpine `edge` package mirrors, and Android AID network groups (`aid_inet:3003`, etc.).
 
 ---
 
