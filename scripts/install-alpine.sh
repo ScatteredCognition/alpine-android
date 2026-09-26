@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # ==============================================================================
 # Alpine Linux Chroot Installer for Android
+# Branch: edge (Rolling / Unstable)
 # Repository: https://github.com/faeizmahrus/alpine-android
 # ==============================================================================
 
@@ -11,63 +12,112 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-CHROOT_DIR="${1:-/data/chroot/alpine}"
+CLEAN_INSTALL=0
+TARGET_PATH=""
+
+# Parse arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c|--clean)
+            CLEAN_INSTALL=1
+            shift
+            ;;
+        *)
+            if [ -z "$TARGET_PATH" ]; then
+                TARGET_PATH="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+CHROOT_DIR="${TARGET_PATH:-/data/chroot/alpine}"
 INSTALL_BASE="$(dirname "$CHROOT_DIR")"
 TMP_DIR="/data/local/tmp"
 ARCH="aarch64"
-ALPINE_VER="v3.20"
-ALPINE_RELEASE="3.20.3"
-TARBALL="alpine-minirootfs-${ALPINE_RELEASE}-${ARCH}.tar.gz"
-URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VER}/releases/${ARCH}/${TARBALL}"
+ALPINE_BRANCH="edge"
+EDGE_YAML_URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/${ARCH}/latest-releases.yaml"
 
 echo "============================================="
-echo "   Alpine Linux ARM64 Installer for Android  "
+echo "   Alpine Linux (edge) Installer for Android "
 echo "============================================="
 echo "[*] Installation path : $CHROOT_DIR"
 echo "[*] Architecture      : $ARCH"
-echo "[*] Alpine Version    : $ALPINE_RELEASE ($ALPINE_VER)"
+echo "[*] Alpine Branch     : $ALPINE_BRANCH (Rolling)"
+[ "$CLEAN_INSTALL" = "1" ] && echo "[*] Clean install     : YES (wiping older chroot)"
 echo "---------------------------------------------"
 
-# 1. Prepare target directories
-echo "[*] Preparing filesystem..."
+# 1. Handle --clean flag (safely unmount and wipe existing chroot)
+if [ "$CLEAN_INSTALL" = "1" ] && [ -d "$CHROOT_DIR" ]; then
+    echo "[*] Cleaning up existing chroot directory..."
+    umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev/shm" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/proc" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/sys" 2>/dev/null || true
+    rm -rf "$CHROOT_DIR"
+    echo "[+] Previous chroot removed."
+fi
+
+# 2. Prepare directories
 mkdir -p "$CHROOT_DIR" "$TMP_DIR"
 cd "$TMP_DIR"
 
-# 2. Download minirootfs if not already present
-if [ ! -f "$TARBALL" ]; then
-    echo "[*] Downloading official Alpine Linux minirootfs..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -LO "$URL"
-    elif command -v wget >/dev/null 2>&1; then
-        wget "$URL"
-    else
-        echo "[!] Error: Neither curl nor wget found on host!" >&2
-        exit 1
-    fi
+# 3. Resolve latest edge minirootfs filename
+echo "[*] Fetching latest Alpine edge release metadata..."
+TARBALL=""
+if command -v curl >/dev/null 2>&1; then
+    TARBALL=$(curl -sL "$EDGE_YAML_URL" | grep -m1 "file: alpine-minirootfs-" | awk '{print $2}')
+elif command -v wget >/dev/null 2>&1; then
+    TARBALL=$(wget -qO- "$EDGE_YAML_URL" | grep -m1 "file: alpine-minirootfs-" | awk '{print $2}')
 fi
 
-# 3. Extract rootfs
+# Fallback filename if parsing metadata fails
+if [ -z "$TARBALL" ]; then
+    echo "[!] Warning: Could not parse latest-releases.yaml, using dynamic fallback..."
+    TARBALL="alpine-minirootfs-edge-${ARCH}.tar.gz"
+fi
+
+URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/${ARCH}/${TARBALL}"
+
+# 4. Download minirootfs
+echo "[*] Downloading Alpine edge minirootfs ($TARBALL)..."
+if command -v curl >/dev/null 2>&1; then
+    curl -LO "$URL"
+elif command -v wget >/dev/null 2>&1; then
+    wget "$URL"
+fi
+
+# 5. Extract rootfs
 echo "[*] Extracting rootfs into $CHROOT_DIR..."
 tar -xzf "$TARBALL" -C "$CHROOT_DIR"
 rm -f "$TARBALL"
 
-# 4. Configure Public DNS
+# 6. Configure Public DNS
 echo "[*] Setting up DNS resolvers..."
 cat << 'EOF' > "$CHROOT_DIR/etc/resolv.conf"
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
 
-# 5. Inject Android AID network groups (fixes socket permissions)
+# 7. Configure edge apk repositories (main + community)
+echo "[*] Configuring edge package repositories..."
+cat << 'EOF' > "$CHROOT_DIR/etc/apk/repositories"
+https://dl-cdn.alpinelinux.org/alpine/edge/main
+https://dl-cdn.alpinelinux.org/alpine/edge/community
+EOF
+
+# 8. Inject Android AID network groups (fixes socket permissions)
 echo "[*] Injecting Android network AID GIDs into /etc/group..."
 grep -q "^aid_inet:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$CHROOT_DIR/etc/group"
 grep -q "^aid_net_raw:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$CHROOT_DIR/etc/group"
 grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$CHROOT_DIR/etc/group"
 
-# 6. Create mount targets
+# 9. Create mount target folders
 mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
 
-# 7. Generate enter-alpine.sh launcher
+# 10. Generate enter-alpine.sh launcher
 LAUNCHER="$INSTALL_BASE/enter-alpine.sh"
 echo "[*] Writing launcher script to $LAUNCHER..."
 cat << 'EOF' > "$LAUNCHER"
@@ -123,7 +173,7 @@ EOF
 sed -i "s|__CHROOT_DIR__|$CHROOT_DIR|g" "$LAUNCHER"
 chmod 755 "$LAUNCHER"
 
-# 8. Generate stop-alpine.sh unmount script
+# 11. Generate stop-alpine.sh unmount script
 STOP_SCRIPT="$INSTALL_BASE/stop-alpine.sh"
 echo "[*] Writing unmount script to $STOP_SCRIPT..."
 cat << 'EOF' > "$STOP_SCRIPT"
@@ -147,8 +197,8 @@ EOF
 sed -i "s|__CHROOT_DIR__|$CHROOT_DIR|g" "$STOP_SCRIPT"
 chmod 755 "$STOP_SCRIPT"
 
-# 9. Create global symlinks if module/system path exists
-for p in /data/adb/modules/ssh/usr/bin /data/adb/modules/ssh/system/bin; do
+# 12. Create global symlinks if module/system path exists
+for p in /data/adb/modules/alpine/system/bin /data/adb/modules/ssh/usr/bin /data/adb/modules/ssh/system/bin; do
     if [ -d "$p" ]; then
         ln -sf "$LAUNCHER" "$p/alpine" 2>/dev/null || true
         ln -sf "$LAUNCHER" "$p/enter-alpine" 2>/dev/null || true
@@ -157,7 +207,7 @@ for p in /data/adb/modules/ssh/usr/bin /data/adb/modules/ssh/system/bin; do
 done
 
 echo "---------------------------------------------"
-echo "[✓] Installation complete!"
+echo "[✓] Alpine Linux (edge) installed successfully!"
 echo "[*] Enter Alpine: $LAUNCHER (or type 'alpine' if in PATH)"
 echo "[*] Stop Alpine : $STOP_SCRIPT (or type 'stop-alpine')"
 echo "============================================="

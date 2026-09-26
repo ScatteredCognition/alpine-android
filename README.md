@@ -39,13 +39,13 @@ You can flash Alpine directly from custom recovery without needing any terminal 
 1. Download or build the recovery flashable zip:
    ```bash
    ./build-recovery-zip.sh
-   # Produces: out/alpine-chroot-3.20.3-aarch64-recovery.zip
+   # Produces: out/alpine-chroot-edge-aarch64-recovery.zip
    ```
 2. Reboot into **OrangeFox** or **TWRP Recovery**.
-3. Flash `alpine-chroot-3.20.3-aarch64-recovery.zip` (via recovery GUI or `adb sideload`).
+3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI or `adb sideload`).
 4. **What the recovery installer does**:
-   - Extracts the Alpine rootfs to `/data/chroot/alpine`.
-   - Sets up `/etc/resolv.conf` and Android AID network groups.
+   - Extracts the latest Alpine `edge` (rolling) rootfs to `/data/chroot/alpine`.
+   - Sets up `/etc/resolv.conf`, `edge` apk repositories, and Android AID network groups.
    - Creates a **standalone KernelSU / Magisk module** (`/data/adb/modules/alpine/`) that overlays `alpine`, `enter-alpine`, and `stop-alpine` directly into **`/system/bin/`**.
 5. Reboot to Android: `alpine` is universally available from any shell!
 
@@ -59,6 +59,11 @@ From a root terminal on your device (or `adb shell` / `ssh`):
 su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
 ```
 
+To perform a clean installation (safely unmounting and purging any broken or existing chroot first):
+```bash
+su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh -s -- --clean"
+```
+
 ---
 
 ### Method 3: Manual Clone & Install
@@ -68,17 +73,22 @@ su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android
 git clone https://github.com/faeizmahrus/alpine-android.git /data/local/tmp/alpine-android
 cd /data/local/tmp/alpine-android
 
-# Run installer as root (default install location: /data/chroot/alpine)
+# Standard install (default: /data/chroot/alpine, rolling edge branch)
 su -mm -c "sh scripts/install-alpine.sh"
+
+# Or clean install from scratch (wipes any existing chroot cleanly)
+su -mm -c "sh scripts/install-alpine.sh --clean"
 ```
 
 The script will automatically:
-1. Download the official Alpine Linux `aarch64` minirootfs.
-2. Extract it into `/data/chroot/alpine`.
-3. Configure public DNS resolvers (`1.1.1.1` and `8.8.8.8`).
-4. Inject Android AID network groups into `/etc/group` so network sockets function properly.
-5. Create `/data/chroot/enter-alpine.sh` and `/data/chroot/stop-alpine.sh`.
-6. Symlink `alpine`, `enter-alpine`, and `stop-alpine` into `$PATH`.
+1. Safely unmount active mountpoints (`/dev`, `/proc`, `/sys`, `/sdcard`) and purge previous files if `--clean` is passed.
+2. Resolve and download the latest official Alpine Linux `edge` (rolling) `aarch64` minirootfs.
+3. Extract it into `/data/chroot/alpine`.
+4. Configure public DNS resolvers (`1.1.1.1` and `8.8.8.8`).
+5. Configure `edge/main` and `edge/community` apk repositories.
+6. Inject Android AID network groups into `/etc/group` so network sockets function properly.
+7. Create `/data/chroot/enter-alpine.sh` and `/data/chroot/stop-alpine.sh`.
+8. Symlink `alpine`, `enter-alpine`, and `stop-alpine` into `$PATH` (KernelSU/Magisk modules).
 
 ---
 
