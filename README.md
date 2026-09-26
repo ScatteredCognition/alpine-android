@@ -6,12 +6,12 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 ---
 
-## ⚡ Why Native Chroot?
+## Why Native Chroot?
 
 | Feature | PRoot / Termux-PRoot | Linux Deploy (Legacy) | This Chroot Setup |
 | :--- | :--- | :--- | :--- |
 | **Performance** | Emulated (`ptrace`), 3x–10x slowdown | Native, but slow loop disk (`.img`) | **Bare-metal speed** on native F2FS |
-| **Android 12–15+ Support** | Yes | ❌ Broken (debootstrap / loop errors) | **Full support** (Any working `su`) |
+| **Android 12–15+ Support** | Yes | No (Broken by debootstrap / loop errors) | **Full support** (Any working `su`) |
 | **Storage Overhead** | Duplicated inside app sandbox | Fixed virtual disk image size | **Dynamic** (shares phone's 100+ GB) |
 | **Root Privileges** | Faked root | Real root | **True Linux root (`UID 0`)** |
 | **POSIX Permissions** | Emulated | Native inside loop | **Full native POSIX + symlinks** |
@@ -19,7 +19,7 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 1. **Android Device (ARM64 / `aarch64`)**:
    - Unlocked bootloader with a custom recovery (**OrangeFox** or **TWRP**) OR terminal root access.
@@ -30,7 +30,7 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 ---
 
-## 🚀 Installation Methods
+## Installation Methods
 
 ### Method 1: Recovery Flashable ZIP (OrangeFox / TWRP)
 
@@ -54,22 +54,23 @@ Flash directly from custom recovery — completely standalone and lives "off the
 
 ---
 
-### Method 2: Direct One-Liner (via Root Shell / Termux / ADB)
+### Method 2: Direct Installation from Recovery / Root Terminal
 
-From a root terminal on your device (`su` or `adb shell`):
+From a recovery shell or root terminal on your device (`su` or `adb shell`):
 
-```bash
-su -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
-```
+1. Clone or download this repository onto your device, or copy `out/alpine-chroot-edge-aarch64-recovery.zip`.
+2. From the project directory, run:
+   ```bash
+   # Standard installation using chroot-install
+   /data/chroot/bin/chroot-install alpine
 
-To perform a clean installation (safely unmounting and purging any previous chroot first):
-```bash
-su -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh -s -- --clean"
-```
+   # Or force a clean reinstall
+   /data/chroot/bin/chroot-install --force alpine
+   ```
 
 ---
 
-## 💻 Usage & Command Suite
+## Usage & Command Suite
 
 Commands reside in `/data/chroot/bin/` (and are overlaid globally into `/system/bin` if Magisk/KernelSU is used):
 
@@ -118,7 +119,7 @@ chroot-install --force alpine
 
 ---
 
-## 🛠️ Post-Installation & Customization
+## Post-Installation & Customization
 
 ### Change Default Shell to Fish
 
@@ -132,7 +133,7 @@ apk add fish shadow
 chsh -s /usr/bin/fish root
 ```
 
-The `enter-alpine.sh` launcher will automatically detect Fish and launch `/usr/bin/fish -l` by default.
+The `alpine` (or `chroot-run`) launcher will automatically detect Fish and launch `/usr/bin/fish -l` by default.
 
 ### Recommended Baseline Tools
 
@@ -178,7 +179,7 @@ addgroup user aid_net_raw
 
 ---
 
-## 🔬 Technical Deep Dive & Architecture
+## Technical Deep Dive & Architecture
 
 ### 1. Android AID Network Group Hook
 Android kernels use `CONFIG_ANDROID_PARANOID_NETWORK`, which blocks standard `socket(AF_INET, ...)` syscalls from non-Android processes. This project resolves this by declaring Android's private GIDs in Alpine's `/etc/group`:
@@ -193,32 +194,32 @@ mount -t tmpfs -o rw,nosuid,nodev tmpfs "$CHROOT_DIR/dev/shm"
 ```
 
 ### 3. Dynamic DNS Synchronization
-Android routes DNS through its internal `netd` daemon and system properties (`net.dns1`) rather than `/etc/resolv.conf`. Each time `enter-alpine.sh` runs, it refreshes `/etc/resolv.conf` with `1.1.1.1` and `8.8.8.8` to guarantee working network lookups across Wi-Fi and mobile data switches.
+Android routes DNS through its internal `netd` daemon and system properties (`net.dns1`) rather than `/etc/resolv.conf`. Each time `alpine` or `chroot-run` runs, `chroot-helper` refreshes `/etc/resolv.conf` with `1.1.1.1` and `8.8.8.8` to guarantee working network lookups across Wi-Fi and mobile data switches.
 
 ### 4. Clean Environment Isolation
-Android exports numerous non-POSIX environment variables (`ANDROID_DATA`, `BOOTCLASSPATH`, `LD_PRELOAD`) that can crash Linux binaries. The launcher uses:
+Android exports numerous non-POSIX environment variables (`ANDROID_DATA`, `BOOTCLASSPATH`, `LD_PRELOAD`) that can crash Linux binaries. `chroot-helper` uses:
 ```bash
-exec chroot "$CHROOT_DIR" /usr/bin/env -i HOME=/root TERM=xterm-256color SHELL="$LOGIN_SHELL" PATH=... "$LOGIN_SHELL" -l
+exec chroot "$ROOTFS_PATH" /usr/bin/env -i HOME=/root TERM=xterm-256color SHELL="$LOGIN_SHELL" PATH=... "$LOGIN_SHELL" -l
 ```
 This strips the Android environment completely and supplies only pure, clean POSIX variables.
 
 ### 5. Idempotent Mount Plumbing
-The launcher uses `mountpoint -q` checks before every bind-mount. Multiple terminal tabs or SSH sessions can safely invoke `alpine` simultaneously without triggering duplicate or recursive mount errors.
+The engine uses `mountpoint -q` checks before every bind-mount. Multiple terminal tabs or SSH sessions can safely invoke `alpine` simultaneously without triggering duplicate or recursive mount errors.
 
 ### 6. Bundled Static Utilities (`/data/chroot/utils`)
 Stock Android ROMs lack standard networking and archive tools (`curl`, `wget`, `tar` options). To ensure 100% self-reliance regardless of host toolchains:
 - Statically linked `curl` and multi-call `busybox` (with `wget`, `tar`, `gzip`, etc.) are bundled and installed to `/data/chroot/utils`.
-- The launchers (`enter-alpine.sh` and `stop-alpine.sh`) automatically add `/data/chroot/utils` to `$PATH`, ensuring reliable tooling on any bare-metal Android installation.
+- The command suite automatically adds `/data/chroot/utils` to `$PATH`, ensuring reliable tooling on any bare-metal Android installation.
 
 ---
 
-## 👨‍💻 Authors & Attributions
+## Authors & Attributions
 
 - **Author**: Faeiz Mahrus
 - **AI Pair Programmer**: Developed and architected with **Google Antigravity**
 
 ---
 
-## 📄 License
+## License
 
 MIT License. See [LICENSE](LICENSE) for details.
