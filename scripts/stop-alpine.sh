@@ -3,10 +3,24 @@
 # stop-alpine.sh - Clean reverse unmount script for Alpine Linux Chroot
 # ==============================================================================
 
-CHROOT_DIR="${1:-/data/chroot/alpine}"
+CHROOT_DIR="${CHROOT_DIR:-/data/chroot/alpine}"
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec su -mm -c "$0" "$@"
+    if ! command -v su >/dev/null 2>&1; then
+        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+        exit 1
+    fi
+    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
+fi
+
+# Allow overriding chroot directory with -d/--dir or positional argument
+if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    CHROOT_DIR="$2"
+    shift 2
+elif [ -n "$1" ]; then
+    CHROOT_DIR="$1"
+    shift
 fi
 
 echo "[*] Unmounting Alpine chroot at $CHROOT_DIR..."

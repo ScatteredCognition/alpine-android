@@ -34,10 +34,26 @@ INSTALL_BASE="/data/chroot"
 
 # 2. Extract rootfs from zip
 ui_print "- Extracting Alpine edge rootfs to $CHROOT_DIR..."
+
+if [ -d "$CHROOT_DIR" ]; then
+    ui_print "- Cleaning existing chroot directory..."
+    umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev/shm" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/dev" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/proc" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/sys" 2>/dev/null || true
+    rm -rf "$CHROOT_DIR"
+fi
 mkdir -p "$CHROOT_DIR"
 
+TAR_CMD="tar"
+if command -v busybox >/dev/null 2>&1 && busybox tar --help >/dev/null 2>&1; then
+    TAR_CMD="busybox tar"
+fi
+
 if command -v unzip >/dev/null 2>&1; then
-    unzip -p "$ZIPFILE" "rootfs.tar.gz" | tar -xz -C "$CHROOT_DIR" 2>/dev/null || {
+    (cd "$CHROOT_DIR" && unzip -p "$ZIPFILE" "rootfs.tar.gz" | $TAR_CMD -xz) || {
         ui_print "[!] Failed extracting rootfs.tar.gz from zip"; exit 1;
     }
 else
@@ -74,7 +90,18 @@ cat << 'EOF' > "$INSTALL_BASE/enter-alpine.sh"
 CHROOT_DIR="/data/chroot/alpine"
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec su -mm -c "$0" "$@"
+    if ! command -v su >/dev/null 2>&1; then
+        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+        exit 1
+    fi
+    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
+fi
+
+# Allow overriding chroot directory with -d or --dir
+if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    CHROOT_DIR="$2"
+    shift 2
 fi
 
 # Idempotent mounts
@@ -126,7 +153,21 @@ cat << 'EOF' > "$INSTALL_BASE/stop-alpine.sh"
 CHROOT_DIR="/data/chroot/alpine"
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec su -mm -c "$0" "$@"
+    if ! command -v su >/dev/null 2>&1; then
+        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+        exit 1
+    fi
+    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
+fi
+
+# Allow overriding chroot directory with -d/--dir or positional argument
+if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    CHROOT_DIR="$2"
+    shift 2
+elif [ -n "$1" ]; then
+    CHROOT_DIR="$1"
+    shift
 fi
 
 umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
@@ -141,9 +182,9 @@ EOF
 
 chmod 755 "$INSTALL_BASE/stop-alpine.sh"
 
-# 9. Create Standalone KernelSU / Magisk Module for universal /system/bin overlay
-if [ -d /data/adb/modules ] || [ -d /data/adb ]; then
-    ui_print "- Registering standalone KernelSU/Magisk module..."
+# 9. Optional: Register KernelSU/Magisk module if modules directory exists
+if [ -d /data/adb/modules ]; then
+    ui_print "- Registering KernelSU/Magisk overlay module..."
     MOD_DIR="/data/adb/modules/alpine"
     mkdir -p "$MOD_DIR/system/bin"
     
@@ -167,6 +208,7 @@ fi
 
 ui_print "*****************************************"
 ui_print "  Installation Complete!                 "
-ui_print "  Boot Android and run: alpine           "
+ui_print "  Run: /data/chroot/enter-alpine.sh      "
+ui_print "  (or 'alpine' if overlaid into PATH)    "
 ui_print "*****************************************"
 exit 0

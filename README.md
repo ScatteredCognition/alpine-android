@@ -1,6 +1,6 @@
 # Alpine Linux Chroot on Android (ARM64)
 
-A lightweight, bare-metal, native chroot deployment of **Alpine Linux** for rooted Android devices (**KernelSU**, **Magisk**, or **APatch**).
+A lightweight, bare-metal, native chroot deployment of **Alpine Linux** for Android devices with an unlocked bootloader and a root provider (**KernelSU**, **APatch**, **Magisk**, or ROM `su`).
 
 Runs directly on your device's native high-performance **F2FS/ext4** storage with zero emulation overhead, proper POSIX permissions, full Android network hardware access, and seamless bidirectional `/sdcard` sharing.
 
@@ -11,7 +11,7 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 | Feature | PRoot / Termux-PRoot | Linux Deploy (Legacy) | This Chroot Setup |
 | :--- | :--- | :--- | :--- |
 | **Performance** | Emulated (`ptrace`), 3x–10x slowdown | Native, but slow loop disk (`.img`) | **Bare-metal speed** on native F2FS |
-| **Android 12–15+ Support** | Yes | ❌ Broken (debootstrap / loop errors) | **Full support** (KSU/Magisk/APatch) |
+| **Android 12–15+ Support** | Yes | ❌ Broken (debootstrap / loop errors) | **Full support** (Any working `su`) |
 | **Storage Overhead** | Duplicated inside app sandbox | Fixed virtual disk image size | **Dynamic** (shares phone's 100+ GB) |
 | **Root Privileges** | Faked root | Real root | **True Linux root (`UID 0`)** |
 | **POSIX Permissions** | Emulated | Native inside loop | **Full native POSIX + symlinks** |
@@ -21,20 +21,20 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 ## 📋 Prerequisites
 
-1. **Rooted Android Device (ARM64 / `aarch64`)**:
-   - **KernelSU** (or KernelSU-Next), **Magisk**, or **APatch**.
-2. **Global Mount Namespace Mode**:
-   - Ensure your root provider runs commands in the global namespace (e.g. `su -mm` or setting Mount Namespace to *Global* in the manager app).
+1. **Android Device (ARM64 / `aarch64`)**:
+   - Unlocked bootloader with a custom recovery (**OrangeFox** or **TWRP**) OR terminal root access.
+2. **Root (`su`) on Booted Android**:
+   - Working `su` binary (**KernelSU**, **APatch**, **Magisk**, or built-in ROM `su`).
 3. **Terminal Access**:
-   - [Termux](https://github.com/termux/termux-app/releases) or an **ADB / SSH** root connection.
+   - [Termux](https://github.com/termux/termux-app/releases), an **ADB root** shell, or local terminal.
 
 ---
 
 ## 🚀 Installation Methods
 
-### Method 1: Recovery Flashable ZIP (TWRP / OrangeFox) — *No MagiskSSH Required*
+### Method 1: Recovery Flashable ZIP (OrangeFox / TWRP)
 
-You can flash Alpine directly from custom recovery without needing any terminal or app setup:
+Flash directly from custom recovery — completely standalone and lives "off the land" without external dependencies:
 
 1. Download or build the recovery flashable zip:
    ```bash
@@ -42,21 +42,22 @@ You can flash Alpine directly from custom recovery without needing any terminal 
    # Produces: out/alpine-chroot-edge-aarch64-recovery.zip
    ```
 2. Reboot into **OrangeFox** or **TWRP Recovery**.
-3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI or `adb sideload`).
+3. Flash `alpine-chroot-edge-aarch64-recovery.zip` (via recovery GUI, terminal `twrp install`, or `adb sideload`).
 4. **What the recovery installer does**:
-   - Extracts the latest Alpine `edge` (rolling) rootfs to `/data/chroot/alpine`.
+   - Extracts Alpine `edge` (rolling) rootfs into `/data/chroot/alpine`.
    - Sets up `/etc/resolv.conf`, `edge` apk repositories, and Android AID network groups.
-   - Creates a **standalone KernelSU / Magisk module** (`/data/adb/modules/alpine/`) that overlays `alpine`, `enter-alpine`, and `stop-alpine` directly into **`/system/bin/`**.
-5. Reboot to Android: `alpine` is universally available from any shell!
+   - Installs standalone launchers directly at `/data/chroot/alpine`, `/data/chroot/enter-alpine.sh`, and `/data/chroot/stop-alpine.sh`.
+   - Optionally registers a `/data/adb/modules/alpine` overlay only if KernelSU/Magisk modules directory exists.
+5. Reboot to Android!
 
 ---
 
 ### Method 2: Direct One-Liner (via Root Shell / Termux / ADB)
 
-From a root terminal on your device (or `adb shell` / `ssh`):
+From a root terminal on your device (`su` or `adb shell`):
 
 ```bash
-su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
+su -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
 ```
 
 To perform a clean installation (safely unmounting and purging any broken or existing chroot first):
@@ -97,12 +98,19 @@ The script will automatically:
 ### 1. Enter Alpine Linux
 
 ```bash
-# Using the global launcher (if in PATH):
-alpine
-
-# Or directly calling the script:
+# Using the launcher directly:
 /data/chroot/enter-alpine.sh
+
+# Or (if using an alias or overlaid into PATH):
+alpine
 ```
+
+> [!TIP]
+> To run `alpine` from any shell without modifying your system, add this alias to your `~/.bashrc`, `~/.zshrc`, or Termux `~/.bash_profile`:
+> ```bash
+> alias alpine="/data/chroot/enter-alpine.sh"
+> alias stop-alpine="/data/chroot/stop-alpine.sh"
+> ```
 
 You will be dropped into your Alpine shell:
 ```text
@@ -113,9 +121,9 @@ root@localhost:~#
 You can run any command inside Alpine without keeping an interactive session open:
 
 ```bash
-alpine -c "apk update && apk upgrade"
-alpine -c "python3 script.py"
-alpine -c "htop"
+/data/chroot/enter-alpine.sh -c "apk update && apk upgrade"
+/data/chroot/enter-alpine.sh -c "python3 script.py"
+/data/chroot/enter-alpine.sh -c "htop"
 ```
 
 ### 3. Access Android Storage Inside Alpine
@@ -129,8 +137,8 @@ ls /sdcard/Download
 - To exit the Alpine shell back to Android: type `exit`.
 - To cleanly unmount all Alpine filesystems (`/dev`, `/proc`, `/sys`, `/sdcard`):
   ```bash
-  stop-alpine
-  # Or: /data/chroot/stop-alpine.sh
+  /data/chroot/stop-alpine.sh
+  # Or: stop-alpine (if in PATH)
   ```
 
 ---
@@ -157,6 +165,29 @@ The `enter-alpine.sh` launcher will automatically detect Fish and launch `/usr/b
 apk add bash curl nano htop git ca-certificates openssh tmux build-base
 ```
 
+### Running OpenSSH Inside Alpine (Zero Dependencies)
+
+If you want SSH server access without any external Magisk modules or host daemons:
+
+```bash
+# 1. Inside Alpine: install and generate host keys
+apk add openssh
+ssh-keygen -A
+
+# 2. Add your authorized public key
+mkdir -p /root/.ssh
+echo "<your_ssh_public_key>" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+
+# 3. Start SSH server
+/usr/sbin/sshd -p 2222
+```
+
+Connect from your PC anytime:
+```bash
+ssh -p 2222 root@<PHONE_IP>
+```
+
 ### Creating Non-Root Users (with Internet Access)
 
 Android restricts raw network sockets to specific Android Group IDs (GIDs). To ensure any non-root users you create can access the internet:
@@ -169,24 +200,6 @@ adduser -s /usr/bin/fish user
 addgroup user aid_inet
 addgroup user aid_net_raw
 ```
-
----
-
-## 🔒 Persistent Root SSH Access (Optional)
-
-If you want a 24/7 background SSH daemon that starts on device boot and survives screen sleep, install **[Patched-MagiskSSH](https://github.com/powerAn2020/Patched-MagiskSSH)**:
-
-1. Flash `Patched-MagiskSSH.zip` via **KernelSU Manager $\rightarrow$ Modules** (or in custom recovery).
-2. Authorize your computer's public SSH key:
-   ```bash
-   cat ~/.ssh/id_ed25519.pub >> /data/adb/ssh/root/.ssh/authorized_keys
-   chmod 600 /data/adb/ssh/root/.ssh/authorized_keys
-   ```
-3. Connect from your PC anytime:
-   ```bash
-   ssh root@<PHONE_IP>
-   ```
-4. Once in your root Android SSH session, type `alpine` to jump directly into your Alpine Linux environment!
 
 ---
 

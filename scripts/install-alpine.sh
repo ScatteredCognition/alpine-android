@@ -91,7 +91,11 @@ fi
 
 # 5. Extract rootfs
 echo "[*] Extracting rootfs into $CHROOT_DIR..."
-tar -xzf "$TARBALL" -C "$CHROOT_DIR"
+TAR_CMD="tar"
+if command -v busybox >/dev/null 2>&1 && busybox tar --help >/dev/null 2>&1; then
+    TAR_CMD="busybox tar"
+fi
+(cd "$CHROOT_DIR" && $TAR_CMD -xzf "$TMP_DIR/$TARBALL")
 rm -f "$TARBALL"
 
 # 6. Configure Public DNS
@@ -126,7 +130,18 @@ CHROOT_DIR="__CHROOT_DIR__"
 
 # Ensure global mount namespace
 if [ "$(id -u)" -ne 0 ]; then
-    exec su -mm -c "$0" "$@"
+    if ! command -v su >/dev/null 2>&1; then
+        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+        exit 1
+    fi
+    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
+fi
+
+# Allow overriding chroot directory with -d or --dir
+if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    CHROOT_DIR="$2"
+    shift 2
 fi
 
 # Idempotent mounts
@@ -181,7 +196,21 @@ cat << 'EOF' > "$STOP_SCRIPT"
 CHROOT_DIR="__CHROOT_DIR__"
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec su -mm -c "$0" "$@"
+    if ! command -v su >/dev/null 2>&1; then
+        echo "[!] Error: Root privileges required. No 'su' binary found." >&2
+        echo "    Please ensure your device has a working root provider (KernelSU, APatch, Magisk, or ROM su)." >&2
+        exit 1
+    fi
+    exec su -mm -c "$0" "$@" 2>/dev/null || exec su -c "$0" "$@"
+fi
+
+# Allow overriding chroot directory with -d/--dir or positional argument
+if [ "$1" = "-d" ] || [ "$1" = "--dir" ]; then
+    CHROOT_DIR="$2"
+    shift 2
+elif [ -n "$1" ]; then
+    CHROOT_DIR="$1"
+    shift
 fi
 
 umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
@@ -197,14 +226,23 @@ EOF
 sed -i "s|__CHROOT_DIR__|$CHROOT_DIR|g" "$STOP_SCRIPT"
 chmod 755 "$STOP_SCRIPT"
 
-# 12. Create global symlinks if module/system path exists
-for p in /data/adb/modules/alpine/system/bin /data/adb/modules/ssh/usr/bin /data/adb/modules/ssh/system/bin; do
-    if [ -d "$p" ]; then
-        ln -sf "$LAUNCHER" "$p/alpine" 2>/dev/null || true
-        ln -sf "$LAUNCHER" "$p/enter-alpine" 2>/dev/null || true
-        ln -sf "$STOP_SCRIPT" "$p/stop-alpine" 2>/dev/null || true
-    fi
-done
+# 12. Optional convenience: Register Magisk/KernelSU overlay if modules directory exists
+if [ -d /data/adb/modules ]; then
+    MOD_DIR="/data/adb/modules/alpine"
+    mkdir -p "$MOD_DIR/system/bin"
+    cat << 'EOF' > "$MOD_DIR/module.prop"
+id=alpine
+name=Alpine Linux (edge) Chroot
+version=rolling-edge
+versionCode=2
+author=Faeiz Mahrus
+description=Universal launcher overlay for Alpine Linux Chroot.
+EOF
+    ln -sf "$LAUNCHER" "$MOD_DIR/system/bin/alpine" 2>/dev/null || true
+    ln -sf "$LAUNCHER" "$MOD_DIR/system/bin/enter-alpine" 2>/dev/null || true
+    ln -sf "$STOP_SCRIPT" "$MOD_DIR/system/bin/stop-alpine" 2>/dev/null || true
+    chmod -R 755 "$MOD_DIR" 2>/dev/null || true
+fi
 
 echo "---------------------------------------------"
 echo "[✓] Alpine Linux (edge) installed successfully!"
