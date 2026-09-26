@@ -1,31 +1,49 @@
 #!/system/bin/sh
 # ==============================================================================
-# chroot-helper - Core engine for multi-distro chroot management
-# Actions: run <distro> [cmd...], stop <distro>, status [distro]
+# chroot-helper - Core engine and library for multi-distro chroot management
+#
+# Standalone CLI Usage:
+#   chroot-helper <run|stop|status> <distro> [command...]
+#
+# Library Usage:
+#   . /data/chroot/bin/chroot-helper
+#   - Exposes environment constants: BASE_DIR, BIN_DIR, DISTROS_DIR, UTILS_DIR, TMP_DIR
+#   - Prepend BIN_DIR and UTILS_DIR to PATH
+#   - Exposes functions:
+#       load_distro_config, do_mount, do_unmount, count_mounts,
+#       inject_dns, inject_android_aids, safe_download, safe_extract
 # ==============================================================================
 
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-DISTROS_DIR="$BASE_DIR/distros"
-UTILS_DIR="$BASE_DIR/utils"
-
-# Auto-add bundled utils to PATH if available
-[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
-
-# Auto-escalate via su-helper if not running as root
-if [ "$(id -u)" -ne 0 ]; then
-    if [ -x "$SCRIPT_DIR/su-helper" ]; then
-        exec "$SCRIPT_DIR/su-helper" "$0" "$@"
-    else
-        echo "[!] Error: Root required. $SCRIPT_DIR/su-helper not found." >&2
-        exit 1
-    fi
+# Determine base paths
+if [ -n "$BASH_SOURCE" ]; then
+    _SELF="$BASH_SOURCE"
+else
+    _SELF="$0"
 fi
 
-ACTION="$1"
-shift || true
+SCRIPT_DIR="$(cd "$(dirname "$_SELF")" 2>/dev/null && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+BIN_DIR="$SCRIPT_DIR"
+DISTROS_DIR="$BASE_DIR/distros"
+UTILS_DIR="$BASE_DIR/utils"
+TMP_DIR="/data/local/tmp"
+
+# Prepend binaries and bundled static utils to PATH
+[ -d "$BIN_DIR" ] && PATH="$BIN_DIR:$PATH"
+[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
+export PATH BASE_DIR BIN_DIR DISTROS_DIR UTILS_DIR TMP_DIR
+
+# Root auto-escalation check (only when executed directly, not when sourced)
+ensure_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        if [ -x "$BIN_DIR/su-helper" ]; then
+            exec "$BIN_DIR/su-helper" "$@"
+        else
+            echo "[!] Error: Root required. $BIN_DIR/su-helper not found." >&2
+            exit 1
+        fi
+    fi
+}
 
 list_available_distros() {
     if [ -d "$DISTROS_DIR" ]; then
@@ -41,7 +59,7 @@ load_distro_config() {
         echo "[!] Error: No distribution specified." >&2
         echo "Available distributions:" >&2
         list_available_distros | sed 's/^/  - /' >&2
-        exit 1
+        return 1
     fi
 
     local conf="$DISTROS_DIR/$name.conf"
@@ -49,7 +67,7 @@ load_distro_config() {
         echo "[!] Error: Configuration for distribution '$name' not found at $conf" >&2
         echo "Available distributions:" >&2
         list_available_distros | sed 's/^/  - /' >&2
-        exit 1
+        return 1
     fi
 
     # Source the config
@@ -57,6 +75,8 @@ load_distro_config() {
     . "$conf"
 
     # Default fallbacks if omitted from config
+    DISTRO_NAME="${DISTRO_NAME:-$name}"
+    DISTRO_DESCRIPTION="${DISTRO_DESCRIPTION:-Linux distribution}"
     ROOTFS_PATH="${ROOTFS_PATH:-$BASE_DIR/$name}"
     DEFAULT_SHELLS="${DEFAULT_SHELLS:-/bin/sh}"
     DNS_SERVERS="${DNS_SERVERS:-1.1.1.1 8.8.8.8}"
@@ -67,6 +87,68 @@ load_distro_config() {
     ENV_HOME="${ENV_HOME:-/root}"
     ENV_TERM="${ENV_TERM:-xterm-256color}"
     ENV_PATH="${ENV_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+}
+
+inject_dns() {
+    local target="$1"
+    shift || true
+    local servers="$*"
+    [ -z "$servers" ] && servers="$DNS_SERVERS"
+    [ -z "$servers" ] && servers="1.1.1.1 8.8.8.8"
+
+    mkdir -p "$target/etc"
+    : > "$target/etc/resolv.conf"
+    for dns in $servers; do
+        echo "nameserver $dns" >> "$target/etc/resolv.conf"
+    done
+}
+
+inject_android_aids() {
+    local target="$1"
+    mkdir -p "$target/etc"
+    [ ! -f "$target/etc/group" ] && touch "$target/etc/group"
+
+    grep -q "^aid_inet:" "$target/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$target/etc/group"
+    grep -q "^aid_net_raw:" "$target/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$target/etc/group"
+    grep -q "^aid_admin:" "$target/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$target/etc/group"
+}
+
+safe_download() {
+    local url="$1"
+    local output="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSL -o "$output" "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$output" "$url"
+    else
+        echo "[!] Error: safe_download failed: Neither curl nor wget found in PATH." >&2
+        return 1
+    fi
+}
+
+safe_extract() {
+    local tarball="$1"
+    local target="$2"
+
+    if [ ! -f "$tarball" ]; then
+        echo "[!] Error: Tarball '$tarball' not found." >&2
+        return 1
+    fi
+    mkdir -p "$target"
+
+    local tar_cmd="tar"
+    if command -v busybox >/dev/null 2>&1 && busybox tar --help >/dev/null 2>&1; then
+        tar_cmd="busybox tar"
+    fi
+
+    # Avoid toybox tar -C traversal check by changing directory first
+    (cd "$target" && $tar_cmd -xzf "$tarball")
+}
+
+count_mounts() {
+    local target="$1"
+    mount | grep -F " on $target" | wc -l
 }
 
 do_mount() {
@@ -107,20 +189,10 @@ do_mount() {
     fi
 
     # Sync DNS
-    if [ -n "$DNS_SERVERS" ]; then
-        mkdir -p "$target/etc"
-        : > "$target/etc/resolv.conf"
-        for dns in $DNS_SERVERS; do
-            echo "nameserver $dns" >> "$target/etc/resolv.conf"
-        done
-    fi
+    inject_dns "$target" "$DNS_SERVERS"
 
     # Inject Android AID network groups for paranoid network kernels
-    if [ -f "$target/etc/group" ]; then
-        grep -q "^aid_inet:" "$target/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$target/etc/group"
-        grep -q "^aid_net_raw:" "$target/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$target/etc/group"
-        grep -q "^aid_admin:" "$target/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$target/etc/group"
-    fi
+    inject_android_aids "$target"
 }
 
 do_unmount() {
@@ -142,11 +214,6 @@ do_unmount() {
     umount -f "$target/sys" 2>/dev/null || true
 }
 
-count_mounts() {
-    local target="$1"
-    mount | grep -F " on $target" | wc -l
-}
-
 resolve_shell() {
     local target="$ROOTFS_PATH"
     for s in $DEFAULT_SHELLS; do
@@ -161,102 +228,115 @@ resolve_shell() {
     return 1
 }
 
-case "$ACTION" in
-    run)
-        DISTRO="$1"
+# ------------------------------------------------------------------------------
+# Dispatch CLI actions if executed directly as chroot-helper
+# ------------------------------------------------------------------------------
+case "$(basename "$0")" in
+    chroot-helper)
+        set -e
+        ensure_root "$0" "$@"
+
+        ACTION="$1"
         shift || true
-        load_distro_config "$DISTRO"
 
-        if [ ! -d "$ROOTFS_PATH" ]; then
-            echo "[!] Error: Rootfs directory for '$DISTRO' does not exist at $ROOTFS_PATH." >&2
-            echo "    Install it using: chroot-install $DISTRO" >&2
-            exit 1
-        fi
+        case "$ACTION" in
+            run)
+                DISTRO="$1"
+                shift || true
+                load_distro_config "$DISTRO"
 
-        # Mount filesystems
-        do_mount
-
-        # Resolve shell
-        SHELL_BIN="$(resolve_shell)" || {
-            echo "[!] Error: No configured shell found in $ROOTFS_PATH!" >&2
-            echo "    Expected one of: $DEFAULT_SHELLS" >&2
-            exit 1
-        }
-
-        # Execution dispatch
-        if [ $# -gt 0 ]; then
-            exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
-                HOME="$ENV_HOME" \
-                TERM="$ENV_TERM" \
-                SHELL="$SHELL_BIN" \
-                PATH="$ENV_PATH" \
-                "$SHELL_BIN" "$@"
-        else
-            exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
-                HOME="$ENV_HOME" \
-                TERM="$ENV_TERM" \
-                SHELL="$SHELL_BIN" \
-                PATH="$ENV_PATH" \
-                "$SHELL_BIN" -l
-        fi
-        ;;
-
-    stop)
-        DISTRO="$1"
-        shift || true
-        load_distro_config "$DISTRO"
-
-        echo "[*] Unmounting $DISTRO chroot at $ROOTFS_PATH..."
-        do_unmount
-        echo "[+] $DISTRO filesystems unmounted cleanly."
-        ;;
-
-    status)
-        DISTRO="$1"
-        if [ -n "$DISTRO" ]; then
-            load_distro_config "$DISTRO"
-            echo "=== Distribution: $DISTRO_NAME ==="
-            echo " Description : $DISTRO_DESCRIPTION"
-            echo " Rootfs Path : $ROOTFS_PATH"
-            if [ -d "$ROOTFS_PATH" ]; then
-                echo " Installed   : YES"
-                m_count="$(count_mounts "$ROOTFS_PATH")"
-                echo " Active Mounts: $m_count"
-                if [ "$m_count" -gt 0 ]; then
-                    echo " State       : ACTIVE"
-                else
-                    echo " State       : INACTIVE"
+                if [ ! -d "$ROOTFS_PATH" ]; then
+                    echo "[!] Error: Rootfs directory for '$DISTRO' does not exist at $ROOTFS_PATH." >&2
+                    echo "    Install it using: chroot-install $DISTRO" >&2
+                    exit 1
                 fi
-            else
-                echo " Installed   : NO"
-                echo " State       : NOT INSTALLED"
-            fi
-        else
-            echo "=== Multi-Distro Chroot Status ==="
-            printf "%-12s %-12s %-10s %s\n" "DISTRO" "STATUS" "MOUNTS" "ROOTFS"
-            echo "------------------------------------------------------------"
-            for d in $(list_available_distros); do
-                load_distro_config "$d"
-                if [ -d "$ROOTFS_PATH" ]; then
-                    m_count="$(count_mounts "$ROOTFS_PATH")"
-                    if [ "$m_count" -gt 0 ]; then
-                        st="ACTIVE"
+
+                # Mount filesystems
+                do_mount
+
+                # Resolve shell
+                SHELL_BIN="$(resolve_shell)" || {
+                    echo "[!] Error: No configured shell found in $ROOTFS_PATH!" >&2
+                    echo "    Expected one of: $DEFAULT_SHELLS" >&2
+                    exit 1
+                }
+
+                # Execution dispatch
+                if [ $# -gt 0 ]; then
+                    exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
+                        HOME="$ENV_HOME" \
+                        TERM="$ENV_TERM" \
+                        SHELL="$SHELL_BIN" \
+                        PATH="$ENV_PATH" \
+                        "$SHELL_BIN" "$@"
+                else
+                    exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
+                        HOME="$ENV_HOME" \
+                        TERM="$ENV_TERM" \
+                        SHELL="$SHELL_BIN" \
+                        PATH="$ENV_PATH" \
+                        "$SHELL_BIN" -l
+                fi
+                ;;
+
+            stop)
+                DISTRO="$1"
+                shift || true
+                load_distro_config "$DISTRO"
+
+                echo "[*] Unmounting $DISTRO chroot at $ROOTFS_PATH..."
+                do_unmount
+                echo "[+] $DISTRO filesystems unmounted cleanly."
+                ;;
+
+            status)
+                DISTRO="$1"
+                if [ -n "$DISTRO" ]; then
+                    load_distro_config "$DISTRO"
+                    echo "=== Distribution: $DISTRO_NAME ==="
+                    echo " Description : $DISTRO_DESCRIPTION"
+                    echo " Rootfs Path : $ROOTFS_PATH"
+                    if [ -d "$ROOTFS_PATH" ]; then
+                        echo " Installed   : YES"
+                        m_count="$(count_mounts "$ROOTFS_PATH")"
+                        echo " Active Mounts: $m_count"
+                        if [ "$m_count" -gt 0 ]; then
+                            echo " State       : ACTIVE"
+                        else
+                            echo " State       : INACTIVE"
+                        fi
                     else
-                        st="INACTIVE"
+                        echo " Installed   : NO"
+                        echo " State       : NOT INSTALLED"
                     fi
                 else
-                    st="MISSING"
-                    m_count="0"
+                    echo "=== Multi-Distro Chroot Status ==="
+                    printf "%-12s %-12s %-10s %s\n" "DISTRO" "STATUS" "MOUNTS" "ROOTFS"
+                    echo "------------------------------------------------------------"
+                    for d in $(list_available_distros); do
+                        load_distro_config "$d"
+                        if [ -d "$ROOTFS_PATH" ]; then
+                            m_count="$(count_mounts "$ROOTFS_PATH")"
+                            if [ "$m_count" -gt 0 ]; then
+                                st="ACTIVE"
+                            else
+                                st="INACTIVE"
+                            fi
+                        else
+                            st="MISSING"
+                            m_count="0"
+                        fi
+                        printf "%-12s %-12s %-10s %s\n" "$d" "$st" "$m_count" "$ROOTFS_PATH"
+                    done
                 fi
-                printf "%-12s %-12s %-10s %s\n" "$d" "$st" "$m_count" "$ROOTFS_PATH"
-            done
-        fi
-        ;;
+                ;;
 
-    *)
-        echo "Usage: chroot-helper <run|stop|status> <distro> [command...]" >&2
-        echo "Available distributions:" >&2
-        list_available_distros | sed 's/^/  - /' >&2
-        exit 1
+            *)
+                echo "Usage: chroot-helper <run|stop|status> <distro> [command...]" >&2
+                echo "Available distributions:" >&2
+                list_available_distros | sed 's/^/  - /' >&2
+                exit 1
+                ;;
+        esac
         ;;
 esac

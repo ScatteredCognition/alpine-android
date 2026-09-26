@@ -1,28 +1,51 @@
 #!/system/bin/sh
 # ==============================================================================
-# chroot-install - Unified distribution installer using installer plugins
+# chroot-install - Unified distribution installer & lifecycle orchestrator
 # Usage: chroot-install [-f|--force] <distro>
+#
+# ==============================================================================
+# PLUGIN SPECIFICATION & LIFECYCLE CONTRACT:
+# ------------------------------------------------------------------------------
+# Installer plugins (distros/<distro>.install.sh) must adhere to the following:
+#
+# 1. SCOPE OF RESPONSIBILITY:
+#    - Plugins ONLY serve downloading/fetching distribution rootfs archives
+#      and configuring files INSIDE the guest chroot (e.g. package repositories,
+#      default locale, initial distro settings).
+#    - Plugins MUST NOT perform host-level mount management, host-level cleanup,
+#      or directory purges.
+#
+# 2. GUARANTEED PRE-CONDITIONS PROVIDED BY chroot-install:
+#    - Root privileges are guaranteed (verified / escalated via su-helper).
+#    - Target rootfs directory ($1 / $ROOTFS_PATH) is guaranteed clean and unmounted.
+#    - Target directory has already been created (mkdir -p "$target").
+#    - PATH is augmented to include $BIN_DIR and $UTILS_DIR (curl, busybox).
+#    - Reusable library helpers are available (safe_download, safe_extract).
+#
+# 3. GUARANTEED POST-HOOKS EXECUTED BY chroot-install:
+#    - DNS configuration (/etc/resolv.conf) is automatically injected.
+#    - Android network AID groups (aid_inet, aid_net_raw, aid_admin) are
+#      automatically injected into /etc/group.
+#    - Binary execution permissions across the platform are verified.
+#
+# 4. PLUGIN ENTRYPOINT CONTRACT:
+#    - Plugin must implement: install_distro <target_rootfs_path>
 # ==============================================================================
 
 set -e
 
+# Source core engine as library
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-DISTROS_DIR="$BASE_DIR/distros"
-UTILS_DIR="$BASE_DIR/utils"
-
-# Auto-add bundled utils to PATH if available
-[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
+if [ -f "$SCRIPT_DIR/chroot-helper" ]; then
+    # shellcheck disable=SC1091
+    . "$SCRIPT_DIR/chroot-helper"
+else
+    echo "[!] Error: Core library $SCRIPT_DIR/chroot-helper not found." >&2
+    exit 1
+fi
 
 # Auto-escalate via su-helper if not running as root
-if [ "$(id -u)" -ne 0 ]; then
-    if [ -x "$SCRIPT_DIR/su-helper" ]; then
-        exec "$SCRIPT_DIR/su-helper" "$0" "$@"
-    else
-        echo "[!] Error: Root required. $SCRIPT_DIR/su-helper not found." >&2
-        exit 1
-    fi
-fi
+ensure_root "$0" "$@"
 
 FORCE_CLEAN=0
 DISTRO=""
@@ -45,11 +68,7 @@ done
 if [ -z "$DISTRO" ]; then
     echo "Usage: chroot-install [-f|--force] <distro>" >&2
     echo "Available distributions:" >&2
-    if [ -d "$DISTROS_DIR" ]; then
-        for f in "$DISTROS_DIR"/*.conf; do
-            [ -f "$f" ] && basename "$f" .conf | sed 's/^/  - /' >&2
-        done
-    fi
+    list_available_distros | sed 's/^/  - /' >&2
     exit 1
 fi
 
@@ -66,24 +85,63 @@ if [ ! -f "$PLUGIN" ]; then
     exit 1
 fi
 
-# Load config to get target path
-# shellcheck disable=SC1090
-. "$CONF"
-ROOTFS_PATH="${ROOTFS_PATH:-$BASE_DIR/$DISTRO}"
+# Load config to determine target path and settings
+load_distro_config "$DISTRO"
 
-if [ -d "$ROOTFS_PATH" ] && [ "$FORCE_CLEAN" != "1" ]; then
-    echo "[!] Error: Target directory $ROOTFS_PATH already exists!" >&2
-    echo "    Use -f or --force to wipe and reinstall." >&2
+# ------------------------------------------------------------------------------
+# Pre-hook Lifecycle: Safety checks, unmount, purge, and target directory setup
+# ------------------------------------------------------------------------------
+if [ -d "$ROOTFS_PATH" ]; then
+    if [ "$FORCE_CLEAN" != "1" ]; then
+        echo "[!] Error: Target directory $ROOTFS_PATH already exists!" >&2
+        echo "    Use -f or --force to wipe and reinstall." >&2
+        exit 1
+    fi
+
+    echo "[*] Existing installation detected at $ROOTFS_PATH. Preparing clean slate..."
+    echo "[*] Unmounting all active filesystems..."
+    do_unmount
+
+    # Double check mounts are zero before any destructive rm -rf
+    remaining="$(count_mounts "$ROOTFS_PATH")"
+    if [ "$remaining" -gt 0 ]; then
+        echo "[!] Error: Cannot safely wipe $ROOTFS_PATH: $remaining active mounts remaining!" >&2
+        exit 1
+    fi
+
+    echo "[*] Purging existing target directory..."
+    rm -rf "$ROOTFS_PATH"
+fi
+
+mkdir -p "$ROOTFS_PATH" "$TMP_DIR"
+
+# ------------------------------------------------------------------------------
+# Execute Installer Plugin
+# ------------------------------------------------------------------------------
+echo "[*] Sourcing installer plugin: $PLUGIN..."
+# shellcheck disable=SC1090
+. "$PLUGIN"
+
+if ! command -v install_distro >/dev/null 2>&1; then
+    echo "[!] Error: Plugin $PLUGIN does not define 'install_distro'." >&2
     exit 1
 fi
 
-# Run installer plugin
-# shellcheck disable=SC1090
-. "$PLUGIN"
-install_distro "$ROOTFS_PATH" "$FORCE_CLEAN"
+echo "[*] Executing installation for '$DISTRO' -> $ROOTFS_PATH..."
+install_distro "$ROOTFS_PATH"
 
-# Ensure permissions on binaries
-chmod 755 "$SCRIPT_DIR"/* 2>/dev/null || true
+# ------------------------------------------------------------------------------
+# Post-hook Lifecycle: Automatic DNS, Android AID groups, and permissions
+# ------------------------------------------------------------------------------
+echo "[*] Running post-install hooks..."
+echo "  -> Injecting DNS configuration..."
+inject_dns "$ROOTFS_PATH" "$DNS_SERVERS"
+
+echo "  -> Injecting Android network AID groups..."
+inject_android_aids "$ROOTFS_PATH"
+
+# Ensure execution permissions on host binaries
+chmod 755 "$BIN_DIR"/* 2>/dev/null || true
 
 echo "------------------------------------------------------------"
 echo "[✓] Installation complete! You can run it now with:"

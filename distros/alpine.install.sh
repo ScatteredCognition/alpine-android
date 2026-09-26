@@ -1,15 +1,15 @@
 #!/system/bin/sh
 # ==============================================================================
 # alpine.install.sh - Installer plugin for Alpine Linux
-# Called by chroot-install
+#
+# PLUGIN SPECIFICATION COMPLIANCE:
+# - Scope: ONLY responsible for fetching the Alpine minirootfs and configuring
+#          internal guest repositories (/etc/apk/repositories).
+# - Host-level mount management, directory purge, unmounting, DNS injection,
+#   and Android AID groups are automatically handled by chroot-install.
+# - Environment: Receives TMP_DIR, target path ($1), augmented PATH with curl
+#                and busybox, and library helpers (safe_download, safe_extract).
 # ==============================================================================
-
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-UTILS_DIR="$BASE_DIR/utils"
-[ -d "$UTILS_DIR" ] && PATH="$UTILS_DIR:$PATH"
 
 ARCH="aarch64"
 ALPINE_BRANCH="edge"
@@ -17,73 +17,41 @@ EDGE_YAML_URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/$
 
 install_distro() {
     local target="$1"
-    local clean_flag="$2"
-    local tmp_dir="/data/local/tmp"
+    local tmp_dir="${TMP_DIR:-/data/local/tmp}"
+    local yaml_file="$tmp_dir/alpine-latest.yaml"
 
-    echo "[*] Preparing installation target: $target"
-    if [ "$clean_flag" = "1" ] && [ -d "$target" ]; then
-        echo "[*] Purging existing installation at $target..."
-        umount -f "$target/sdcard" 2>/dev/null || true
-        umount -f "$target/dev/shm" 2>/dev/null || true
-        umount -f "$target/dev/pts" 2>/dev/null || true
-        umount -f "$target/dev" 2>/dev/null || true
-        umount -f "$target/proc" 2>/dev/null || true
-        umount -f "$target/sys" 2>/dev/null || true
-        rm -rf "$target"
-    fi
+    echo "[*] Fetching Alpine edge release metadata..."
+    safe_download "$EDGE_YAML_URL" "$yaml_file"
 
-    mkdir -p "$target" "$tmp_dir"
+    local tarball
+    tarball=$(grep -m1 "file: alpine-minirootfs-" "$yaml_file" 2>/dev/null | awk '{print $2}')
+    rm -f "$yaml_file"
 
-    # Select downloader
-    DOWNLOADER=""
-    if command -v curl >/dev/null 2>&1; then
-        DOWNLOADER="curl"
-    elif command -v wget >/dev/null 2>&1; then
-        DOWNLOADER="wget"
-    else
-        echo "[!] Error: Neither curl nor wget is available." >&2
-        exit 1
-    fi
+    [ -z "$tarball" ] && tarball="alpine-minirootfs-edge-${ARCH}.tar.gz"
 
-    echo "[*] Fetching Alpine edge release metadata ($DOWNLOADER)..."
-    TARBALL=""
-    if [ "$DOWNLOADER" = "curl" ]; then
-        TARBALL=$(curl -sL "$EDGE_YAML_URL" | grep -m1 "file: alpine-minirootfs-" | awk '{print $2}')
-    else
-        TARBALL=$(wget -qO- "$EDGE_YAML_URL" | grep -m1 "file: alpine-minirootfs-" | awk '{print $2}')
-    fi
+    local download_url="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/${ARCH}/${tarball}"
+    local local_tarball="$tmp_dir/$tarball"
 
-    [ -z "$TARBALL" ] && TARBALL="alpine-minirootfs-edge-${ARCH}.tar.gz"
-
-    URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_BRANCH}/releases/${ARCH}/${TARBALL}"
-    echo "[*] Downloading Alpine edge minirootfs ($TARBALL)..."
-    if [ "$DOWNLOADER" = "curl" ]; then
-        curl -sL -o "$tmp_dir/$TARBALL" "$URL"
-    else
-        wget -q -O "$tmp_dir/$TARBALL" "$URL"
-    fi
+    echo "[*] Downloading Alpine edge minirootfs ($tarball)..."
+    safe_download "$download_url" "$local_tarball"
 
     echo "[*] Extracting minirootfs into $target..."
-    TAR_CMD="tar"
-    if command -v busybox >/dev/null 2>&1 && busybox tar --help >/dev/null 2>&1; then
-        TAR_CMD="busybox tar"
-    fi
+    safe_extract "$local_tarball" "$target"
+    rm -f "$local_tarball"
 
-    (cd "$target" && $TAR_CMD -xzf "$tmp_dir/$TARBALL")
-    rm -f "$tmp_dir/$TARBALL"
-
-    # Configure APK repositories
+    # Configure Alpine package repositories inside the rootfs
     echo "[*] Configuring edge package repositories..."
     mkdir -p "$target/etc/apk"
     cat << 'EOF' > "$target/etc/apk/repositories"
 https://dl-cdn.alpinelinux.org/alpine/edge/main
 https://dl-cdn.alpinelinux.org/alpine/edge/community
+https://dl-cdn.alpinelinux.org/alpine/edge/testing
 EOF
 
-    echo "[✓] Alpine Linux installed successfully at $target."
+    echo "[✓] Alpine rootfs and repositories configured successfully."
 }
 
-# Standalone execution
+# Standalone execution support
 if [ "$1" = "install" ]; then
     shift
     install_distro "$@"
