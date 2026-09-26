@@ -4,17 +4,5 @@
 # Usage: chroot-stop <distro>
 # ==============================================================================
 
-# Resolve real script directory across symlinks
-_SELF="$0"
-while [ -L "$_SELF" ]; do
-    _TARGET="$(readlink "$_SELF")"
-    case "$_TARGET" in
-        /*) _SELF="$_TARGET" ;;
-        *) _SELF="$(dirname "$_SELF")/$_TARGET" ;;
-    esac
-done
-
-SCRIPT_DIR="$(cd "$(dirname "$_SELF")" 2>/dev/null && pwd)"
-[ ! -f "$SCRIPT_DIR/chroot-helper" ] && SCRIPT_DIR="/data/chroot/bin"
-
-exec "$SCRIPT_DIR/chroot-helper" stop "$@"
+BASE_DIR="${CHROOT_BASE:-/data/chroot}"
+exec "$BASE_DIR/bin/chroot-helper" stop "$@"

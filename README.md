@@ -49,7 +49,6 @@ Flash directly from custom recovery — completely standalone and lives "off the
    - Installs distro definitions into `/data/chroot/distros/` (`alpine.conf`, `alpine.install.sh`).
    - Installs static standalone networking utilities into `/data/chroot/utils/` (`curl`, `busybox`).
    - Sets up `/etc/resolv.conf`, `edge` apk repositories, and Android AID network groups.
-   - Optionally registers a `/data/adb/modules/chroot` overlay only if KernelSU/Magisk modules directory exists.
 5. Reboot to Android!
 
 ---
@@ -81,50 +80,59 @@ If deploying manually without flashing the recovery ZIP:
 
 ## Usage & Command Suite
 
-Commands reside in `/data/chroot/bin/` (and are overlaid globally into `/system/bin` if Magisk/KernelSU is used):
+All commands reside in `/data/chroot/bin/`:
+
+```bash
+# Direct execution:
+/data/chroot/bin/alpine
+/data/chroot/bin/chroot-run alpine
+/data/chroot/bin/chroot-stop alpine
+/data/chroot/bin/chroot-status
+/data/chroot/bin/chroot-install alpine
+```
+
+> [!TIP]
+> Add `/data/chroot/bin` to your `$PATH` in `~/.bashrc`, `~/.zshrc`, or Termux `~/.bash_profile` to run commands from anywhere without specifying the full path:
+> ```bash
+> export PATH="/data/chroot/bin:$PATH"
+> ```
 
 ### 1. Dedicated Shortcut: `alpine`
 Launch directly into Alpine Linux:
 ```bash
 # Interactive login shell:
-alpine
+/data/chroot/bin/alpine
 # Or direct command execution:
-alpine -c "apk update && apk upgrade"
-alpine -c "htop"
+/data/chroot/bin/alpine -c "apk update && apk upgrade"
+/data/chroot/bin/alpine -c "htop"
 ```
 
 ### 2. Universal Runner: `chroot-run <distro> [command...]`
 Run any configured distribution:
 ```bash
-chroot-run alpine
-chroot-run alpine -c "uname -a"
+/data/chroot/bin/chroot-run alpine
+/data/chroot/bin/chroot-run alpine -c "uname -a"
 ```
 
 ### 3. Stop / Unmount: `chroot-stop <distro>`
 Cleanly unmount all active filesystems for a distribution:
 ```bash
-chroot-stop alpine
+/data/chroot/bin/chroot-stop alpine
 ```
 
 ### 4. Status Inspection: `chroot-status [distro]`
 View active mounts, installation states, and running status:
 ```bash
-chroot-status
-chroot-status alpine
+/data/chroot/bin/chroot-status
+/data/chroot/bin/chroot-status alpine
 ```
 
 ### 5. Install Distros: `chroot-install [-f|--force] <distro>`
 Install or reinstall distributions via their installer plugin:
 ```bash
-chroot-install alpine
-chroot-install --force alpine
+/data/chroot/bin/chroot-install alpine
+/data/chroot/bin/chroot-install --force alpine
 ```
-
-> [!TIP]
-> If not using a KernelSU/Magisk module, add `/data/chroot/bin` to your `$PATH` or add aliases in `~/.bashrc`, `~/.zshrc`, or Termux `~/.bash_profile`:
-> ```bash
-> export PATH="/data/chroot/bin:$PATH"
-> ```
 
 ---
 

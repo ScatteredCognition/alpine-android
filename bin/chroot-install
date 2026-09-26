@@ -36,13 +36,14 @@
 
 set -e
 
-# Source core engine as library
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/chroot-helper" ]; then
+BASE_DIR="${CHROOT_BASE:-/data/chroot}"
+BIN_DIR="$BASE_DIR/bin"
+
+if [ -f "$BIN_DIR/chroot-helper" ]; then
     # shellcheck disable=SC1091
-    . "$SCRIPT_DIR/chroot-helper"
+    . "$BIN_DIR/chroot-helper"
 else
-    echo "[!] Error: Core library $SCRIPT_DIR/chroot-helper not found." >&2
+    echo "[!] Error: Core library $BIN_DIR/chroot-helper not found." >&2
     exit 1
 fi
 

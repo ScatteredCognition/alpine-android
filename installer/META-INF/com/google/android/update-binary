@@ -98,39 +98,13 @@ grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3
 # 7. Create mount target folders
 mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
 
-# 8. Clean up any obsolete root scripts
+# 8. Clean up any obsolete root scripts and legacy KernelSU modules
 rm -f "$INSTALL_BASE/enter-alpine.sh" "$INSTALL_BASE/stop-alpine.sh" "$INSTALL_BASE/alpine" 2>/dev/null || true
-
-# 9. Optional: Register KernelSU/Magisk module if modules directory exists
-if [ -d /data/adb/modules ]; then
-    ui_print "- Registering KernelSU/Magisk overlay module (id: chroot)..."
-    # Clean up obsolete alpine module if present
-    rm -rf /data/adb/modules/alpine 2>/dev/null || true
-
-    MOD_DIR="/data/adb/modules/chroot"
-    mkdir -p "$MOD_DIR/system/bin"
-    
-    cat << 'EOF' > "$MOD_DIR/module.prop"
-id=chroot
-name=Multi-Distro Linux Chroot for Android
-version=rolling-edge
-versionCode=3
-author=Faeiz Mahrus (built with Antigravity)
-description=Universal /system/bin command suite (alpine, chroot-run, chroot-stop, chroot-status, chroot-install) for native Android chroots.
-EOF
-    
-    for b in "$INSTALL_BASE/bin/"*; do
-        [ -f "$b" ] && ln -sf "$b" "$MOD_DIR/system/bin/$(basename "$b")"
-    done
-    
-    chmod -R 755 "$MOD_DIR"
-    chcon -h u:object_r:system_file:s0 "$MOD_DIR/system/bin/"* 2>/dev/null || true
-    ui_print "  -> Overlaid commands into /system/bin/"
-fi
+rm -rf /data/adb/modules/alpine /data/adb/modules/chroot 2>/dev/null || true
 
 ui_print "*****************************************"
 ui_print "  Installation Complete!                 "
 ui_print "  Run: /data/chroot/bin/alpine           "
-ui_print "  (or 'alpine' if overlaid into PATH)    "
+ui_print "  (Add /data/chroot/bin to your PATH)    "
 ui_print "*****************************************"
 exit 0
