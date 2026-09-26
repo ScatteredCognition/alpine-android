@@ -30,7 +30,7 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
      - [Magisk](https://github.com/topjohnwu/Magisk) (Systemless root)
      - Built-in ROM `su` (e.g. LineageOS `su` addon or userdebug builds).
 3. **Terminal Access**:
-   - [Termux](https://github.com/termux/termux-app/releases), an **ADB root** shell, or a persistent SSH server (such as [MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH)).
+   - [Termux](https://github.com/termux/termux-app/releases), an **ADB root** shell, or a persistent SSH server (such as [MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH) / [patched-magiskssh](https://github.com/faeizmahrus/patched-magiskssh)).
 
 ---
 
@@ -169,8 +169,20 @@ apk add bash curl nano htop git ca-certificates openssh tmux build-base
 You can run an SSH server either natively on the Android host (recommended for whole-device administration) or inside the Alpine chroot:
 
 #### Option A: Host-Level Persistent SSH via MagiskSSH (Recommended)
-[MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH) runs an OpenSSH server natively on the Android host across reboots via Magisk, KernelSU, or APatch.
-1. Flash the **MagiskSSH** module via KernelSU / APatch / Magisk app.
+Running OpenSSH on the Android host across reboots via Magisk, KernelSU, or APatch allows remote access directly to the host OS and one-command entry into the chroot.
+
+Two module variants are available:
+- **[MagiskSSH](https://github.com/Magisk-Modules-Alt-Repo/MagiskSSH)**: The standard upstream module providing an OpenSSH server.
+- **[patched-magiskssh](https://github.com/faeizmahrus/patched-magiskssh)**: Patched fork fixing modern Android/KernelSU issues (e.g. PAM/SELinux denials, permissions, and shell environment handling).
+
+| Feature / Scenario | Standard MagiskSSH | patched-magiskssh |
+| :--- | :--- | :--- |
+| **Best For** | Standard Magisk on legacy/stock setups | Modern Android 12–15+, KernelSU, APatch |
+| **Environment Fixes** | Standard Android PATH | Patched environment & login shell handling |
+| **Recommendation** | Use if already installed and working | Recommended if encountering login or permission issues |
+
+**Quick Setup:**
+1. Flash your preferred MagiskSSH module via KernelSU / APatch / Magisk app.
 2. Place your PC's public key in `/data/adb/ssh/root/.ssh/authorized_keys` (or set a password).
 3. Connect via port `22`:
    ```bash
