@@ -1,0 +1,164 @@
+#!/sbin/sh
+# ==============================================================================
+# TWRP / OrangeFox Recovery Flashable Installer for Alpine Linux Chroot
+# ==============================================================================
+
+OUTFD=$2
+ZIPFILE=$3
+
+ui_print() {
+    if [ -n "$OUTFD" ]; then
+        echo "ui_print $1" >&$OUTFD
+        echo "ui_print" >&$OUTFD
+    else
+        echo "$1"
+    fi
+}
+
+ui_print "*****************************************"
+ui_print "    Alpine Linux Chroot Installer        "
+ui_print "    for Android (ARM64)                  "
+ui_print "*****************************************"
+
+# 1. Mount /data
+ui_print "- Mounting /data..."
+mount /data 2>/dev/null || true
+if ! mountpoint -q /data && ! mountpoint -q /sdcard; then
+    ui_print "[!] Error: /data is not mounted or encrypted!"
+    exit 1
+fi
+
+CHROOT_DIR="/data/chroot/alpine"
+INSTALL_BASE="/data/chroot"
+
+# 2. Extract rootfs from zip
+ui_print "- Extracting Alpine rootfs to $CHROOT_DIR..."
+mkdir -p "$CHROOT_DIR"
+
+if command -v unzip >/dev/null 2>&1; then
+    unzip -p "$ZIPFILE" "rootfs.tar.gz" | tar -xz -C "$CHROOT_DIR" 2>/dev/null || {
+        ui_print "[!] Failed extracting rootfs.tar.gz from zip"; exit 1;
+    }
+else
+    ui_print "[!] Error: unzip command missing in recovery environment"; exit 1;
+fi
+
+# 3. Setup DNS
+ui_print "- Setting up DNS configuration..."
+cat << 'EOF' > "$CHROOT_DIR/etc/resolv.conf"
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+
+# 4. Inject Android AID network groups
+ui_print "- Configuring Android network AID GIDs..."
+grep -q "^aid_inet:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_inet:x:3003:root" >> "$CHROOT_DIR/etc/group"
+grep -q "^aid_net_raw:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_net_raw:x:3004:root" >> "$CHROOT_DIR/etc/group"
+grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$CHROOT_DIR/etc/group"
+
+# 5. Create mount target folders
+mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
+
+# 6. Generate enter-alpine.sh launcher
+ui_print "- Installing launcher at $INSTALL_BASE/enter-alpine.sh..."
+cat << 'EOF' > "$INSTALL_BASE/enter-alpine.sh"
+#!/system/bin/sh
+CHROOT_DIR="/data/chroot/alpine"
+
+if [ "$(id -u)" -ne 0 ]; then
+    exec su -mm -c "$0" "$@"
+fi
+
+# Idempotent mounts
+mountpoint -q "$CHROOT_DIR/dev" || mount --bind /dev "$CHROOT_DIR/dev"
+mountpoint -q "$CHROOT_DIR/dev/pts" || mount --bind /dev/pts "$CHROOT_DIR/dev/pts"
+mountpoint -q "$CHROOT_DIR/proc" || mount -t proc proc "$CHROOT_DIR/proc"
+mountpoint -q "$CHROOT_DIR/sys" || mount -t sysfs sysfs "$CHROOT_DIR/sys"
+
+# POSIX shared memory (tmpfs)
+mkdir -p "$CHROOT_DIR/dev/shm" 2>/dev/null || true
+mountpoint -q "$CHROOT_DIR/dev/shm" || mount -t tmpfs -o rw,nosuid,nodev tmpfs "$CHROOT_DIR/dev/shm" 2>/dev/null || true
+
+# Storage bridge
+mkdir -p "$CHROOT_DIR/sdcard" 2>/dev/null || true
+mountpoint -q "$CHROOT_DIR/sdcard" || mount --bind /sdcard "$CHROOT_DIR/sdcard" 2>/dev/null || true
+
+# DNS
+echo "nameserver 1.1.1.1" > "$CHROOT_DIR/etc/resolv.conf"
+echo "nameserver 8.8.8.8" >> "$CHROOT_DIR/etc/resolv.conf"
+
+# Shell detection
+LOGIN_SHELL="/usr/bin/fish"
+[ ! -x "$CHROOT_DIR$LOGIN_SHELL" ] && LOGIN_SHELL="/bin/bash"
+[ ! -x "$CHROOT_DIR$LOGIN_SHELL" ] && LOGIN_SHELL="/bin/sh"
+
+# Execution dispatch
+if [ $# -gt 0 ]; then
+    exec chroot "$CHROOT_DIR" /usr/bin/env -i \
+        HOME=/root \
+        TERM=xterm-256color \
+        SHELL="$LOGIN_SHELL" \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        "$LOGIN_SHELL" "$@"
+else
+    exec chroot "$CHROOT_DIR" /usr/bin/env -i \
+        HOME=/root \
+        TERM=xterm-256color \
+        SHELL="$LOGIN_SHELL" \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        "$LOGIN_SHELL" -l
+fi
+EOF
+
+chmod 755 "$INSTALL_BASE/enter-alpine.sh"
+
+# 7. Generate stop-alpine.sh
+cat << 'EOF' > "$INSTALL_BASE/stop-alpine.sh"
+#!/system/bin/sh
+CHROOT_DIR="/data/chroot/alpine"
+
+if [ "$(id -u)" -ne 0 ]; then
+    exec su -mm -c "$0" "$@"
+fi
+
+umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
+umount -f "$CHROOT_DIR/dev/shm" 2>/dev/null || true
+umount -f "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+umount -f "$CHROOT_DIR/dev" 2>/dev/null || true
+umount -f "$CHROOT_DIR/proc" 2>/dev/null || true
+umount -f "$CHROOT_DIR/sys" 2>/dev/null || true
+
+echo "[+] Alpine unmounted cleanly."
+EOF
+
+chmod 755 "$INSTALL_BASE/stop-alpine.sh"
+
+# 8. Create Standalone KernelSU / Magisk Module for universal /system/bin overlay
+if [ -d /data/adb/modules ] || [ -d /data/adb ]; then
+    ui_print "- Registering standalone KernelSU/Magisk module..."
+    MOD_DIR="/data/adb/modules/alpine"
+    mkdir -p "$MOD_DIR/system/bin"
+    
+    cat << 'EOF' > "$MOD_DIR/module.prop"
+id=alpine
+name=Alpine Linux Chroot
+version=v3.20.3
+versionCode=1
+author=Faeiz Mahrus
+description=Universal /system/bin launcher overlay for Alpine Linux Chroot.
+EOF
+    
+    ln -sf "$INSTALL_BASE/enter-alpine.sh" "$MOD_DIR/system/bin/alpine"
+    ln -sf "$INSTALL_BASE/enter-alpine.sh" "$MOD_DIR/system/bin/enter-alpine"
+    ln -sf "$INSTALL_BASE/stop-alpine.sh" "$MOD_DIR/system/bin/stop-alpine"
+    
+    chmod -R 755 "$MOD_DIR"
+    chcon -h u:object_r:system_file:s0 "$MOD_DIR/system/bin/"* 2>/dev/null || true
+    ui_print "  -> Overlaid to /system/bin/alpine"
+fi
+
+ui_print "*****************************************"
+ui_print "  Installation Complete!                 "
+ui_print "  Boot Android and run: alpine           "
+ui_print "*****************************************"
+exit 0

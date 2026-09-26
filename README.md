@@ -30,9 +30,28 @@ Runs directly on your device's native high-performance **F2FS/ext4** storage wit
 
 ---
 
-## 🚀 Quick Start (Automated Installation)
+## 🚀 Installation Methods
 
-### Method 1: Direct One-Liner (via Root Shell / Termux / ADB)
+### Method 1: Recovery Flashable ZIP (TWRP / OrangeFox) — *No MagiskSSH Required*
+
+You can flash Alpine directly from custom recovery without needing any terminal or app setup:
+
+1. Download or build the recovery flashable zip:
+   ```bash
+   ./build-recovery-zip.sh
+   # Produces: out/alpine-chroot-3.20.3-aarch64-recovery.zip
+   ```
+2. Reboot into **OrangeFox** or **TWRP Recovery**.
+3. Flash `alpine-chroot-3.20.3-aarch64-recovery.zip` (via recovery GUI or `adb sideload`).
+4. **What the recovery installer does**:
+   - Extracts the Alpine rootfs to `/data/chroot/alpine`.
+   - Sets up `/etc/resolv.conf` and Android AID network groups.
+   - Creates a **standalone KernelSU / Magisk module** (`/data/adb/modules/alpine/`) that overlays `alpine`, `enter-alpine`, and `stop-alpine` directly into **`/system/bin/`**.
+5. Reboot to Android: `alpine` is universally available from any shell!
+
+---
+
+### Method 2: Direct One-Liner (via Root Shell / Termux / ADB)
 
 From a root terminal on your device (or `adb shell` / `ssh`):
 
@@ -40,7 +59,9 @@ From a root terminal on your device (or `adb shell` / `ssh`):
 su -mm -c "curl -sL https://raw.githubusercontent.com/faeizmahrus/alpine-android/main/scripts/install-alpine.sh | sh"
 ```
 
-### Method 2: Manual Clone & Install
+---
+
+### Method 3: Manual Clone & Install
 
 ```bash
 # Push or clone repository onto the device
