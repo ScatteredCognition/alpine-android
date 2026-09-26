@@ -5,6 +5,7 @@
 # PLUGIN SPECIFICATION COMPLIANCE:
 # - Scope: ONLY responsible for fetching the Alpine minirootfs and configuring
 #          internal guest repositories (/etc/apk/repositories).
+# - Execution: Sourced strictly by chroot-install (NOT executable standalone).
 # - Host-level mount management, directory purge, unmounting, DNS injection,
 #   and Android AID groups are automatically handled by chroot-install.
 # - Environment: Receives TMP_DIR, target path ($1), augmented PATH with curl
@@ -50,9 +51,3 @@ EOF
 
     echo "[✓] Alpine rootfs and repositories configured successfully."
 }
-
-# Standalone execution support
-if [ "$1" = "install" ]; then
-    shift
-    install_distro "$@"
-fi

@@ -29,7 +29,9 @@
 #    - Binary execution permissions across the platform are verified.
 #
 # 4. PLUGIN ENTRYPOINT CONTRACT:
-#    - Plugin must implement: install_distro <target_rootfs_path>
+#    - Plugins are library scripts sourced strictly by chroot-install;
+#      they must NOT be executed directly or contain standalone wrappers.
+#    - Plugin must define: install_distro <target_rootfs_path>
 # ==============================================================================
 
 set -e
