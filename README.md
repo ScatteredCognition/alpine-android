@@ -2,7 +2,7 @@
 
 A lightweight, bare-metal, native chroot deployment of **Alpine Linux** for Android devices with an unlocked bootloader and a root provider (**KernelSU**, **APatch**, **Magisk**, or ROM `su`).
 
-Runs directly on your device's native high-performance **F2FS/ext4** storage with zero emulation overhead, proper POSIX permissions, full Android network hardware access, and seamless bidirectional `/sdcard` sharing.
+Runs directly on your device's native high-performance **F2FS/ext4** storage with zero emulation overhead, proper POSIX permissions, full Android network hardware access, seamless access to all Android user profiles (`/mnt/media`), and external storage (`/mnt/external`).
 
 ---
 
@@ -289,7 +289,7 @@ DNS_SERVERS="1.1.1.1 8.8.8.8"
 ENABLE_CORE_MOUNTS=1
 ENABLE_SHM=1
 ENABLE_DEVPTS=1
-ENABLE_SDCARD=1
+ENABLE_STORAGE_MOUNTS=1
 
 # Optional extra custom bind mounts: format "HOST_PATH:CHROOT_TARGET" separated by spaces
 EXTRA_MOUNTS=""

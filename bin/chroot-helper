@@ -75,7 +75,7 @@ load_distro_config() {
     ENABLE_CORE_MOUNTS="${ENABLE_CORE_MOUNTS:-1}"
     ENABLE_SHM="${ENABLE_SHM:-1}"
     ENABLE_DEVPTS="${ENABLE_DEVPTS:-1}"
-    ENABLE_SDCARD="${ENABLE_SDCARD:-1}"
+    ENABLE_STORAGE_MOUNTS="${ENABLE_STORAGE_MOUNTS:-${ENABLE_SDCARD:-1}}"
     ENV_HOME="${ENV_HOME:-/root}"
     ENV_TERM="${ENV_TERM:-xterm-256color}"
     ENV_PATH="${ENV_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
@@ -173,9 +173,15 @@ do_mount() {
         mountpoint -q "$target/dev/shm" || mount -t tmpfs -o rw,nosuid,nodev tmpfs "$target/dev/shm" 2>/dev/null || true
     fi
 
-    if [ "$ENABLE_SDCARD" = "1" ]; then
-        mkdir -p "$target/sdcard"
-        mountpoint -q "$target/sdcard" || mount --bind /sdcard "$target/sdcard" 2>/dev/null || true
+    if [ "$ENABLE_STORAGE_MOUNTS" = "1" ]; then
+        if [ -d "/data/media" ]; then
+            mkdir -p "$target/mnt/media"
+            mountpoint -q "$target/mnt/media" || mount --bind /data/media "$target/mnt/media" 2>/dev/null || true
+        fi
+        if [ -d "/mnt/media_rw" ]; then
+            mkdir -p "$target/mnt/external"
+            mountpoint -q "$target/mnt/external" || mount --bind /mnt/media_rw "$target/mnt/external" 2>/dev/null || true
+        fi
     fi
 
     # Mount custom arbitrary bind mounts
@@ -208,6 +214,8 @@ do_unmount() {
         done
     fi
 
+    umount -f "$target/mnt/external" 2>/dev/null || true
+    umount -f "$target/mnt/media" 2>/dev/null || true
     umount -f "$target/sdcard" 2>/dev/null || true
     umount -f "$target/dev/shm" 2>/dev/null || true
     umount -f "$target/dev/pts" 2>/dev/null || true

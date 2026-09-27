@@ -37,6 +37,8 @@ ui_print "- Extracting Alpine edge rootfs to $CHROOT_DIR..."
 
 if [ -d "$CHROOT_DIR" ]; then
     ui_print "- Cleaning existing chroot directory..."
+    umount -f "$CHROOT_DIR/mnt/external" 2>/dev/null || true
+    umount -f "$CHROOT_DIR/mnt/media" 2>/dev/null || true
     umount -f "$CHROOT_DIR/sdcard" 2>/dev/null || true
     umount -f "$CHROOT_DIR/dev/shm" 2>/dev/null || true
     umount -f "$CHROOT_DIR/dev/pts" 2>/dev/null || true
@@ -96,7 +98,7 @@ grep -q "^aid_net_raw:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_net_raw
 grep -q "^aid_admin:" "$CHROOT_DIR/etc/group" 2>/dev/null || echo "aid_admin:x:3005:root" >> "$CHROOT_DIR/etc/group"
 
 # 7. Create mount target folders
-mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/sdcard"
+mkdir -p "$CHROOT_DIR/dev" "$CHROOT_DIR/dev/pts" "$CHROOT_DIR/dev/shm" "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/mnt/media" "$CHROOT_DIR/mnt/external"
 
 # 8. Clean up any obsolete root scripts and legacy KernelSU modules
 rm -f "$INSTALL_BASE/enter-alpine.sh" "$INSTALL_BASE/stop-alpine.sh" "$INSTALL_BASE/alpine" 2>/dev/null || true
