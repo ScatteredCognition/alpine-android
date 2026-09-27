@@ -49,5 +49,5 @@ https://dl-cdn.alpinelinux.org/alpine/edge/community
 https://dl-cdn.alpinelinux.org/alpine/edge/testing
 EOF
 
-    echo "[✓] Alpine rootfs and repositories configured successfully."
+    echo "[+] Alpine rootfs and repositories configured successfully."
 }

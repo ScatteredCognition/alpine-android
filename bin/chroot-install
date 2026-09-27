@@ -146,8 +146,5 @@ inject_android_aids "$ROOTFS_PATH"
 # Ensure execution permissions on host binaries
 chmod 755 "$BIN_DIR"/* 2>/dev/null || true
 
-echo "------------------------------------------------------------"
-echo "[✓] Installation complete! You can run it now with:"
-echo "    chroot-run $DISTRO"
-[ "$DISTRO" = "alpine" ] && echo "    or simply: alpine"
-echo "------------------------------------------------------------"
+echo "[+] Installation complete for '$DISTRO'. Run with: chroot-run $DISTRO"
+

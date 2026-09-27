@@ -83,7 +83,7 @@ load_distro_config() {
 
 inject_dns() {
     local target="$1"
-    shift || true
+    [ $# -gt 0 ] && shift
     local servers="$*"
     [ -z "$servers" ] && servers="$DNS_SERVERS"
     [ -z "$servers" ] && servers="1.1.1.1 8.8.8.8"
@@ -110,9 +110,19 @@ safe_download() {
     local output="$2"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -sSL -o "$output" "$url"
+        local dns_servers=""
+        local d1 d2
+        d1="$(getprop net.dns1 2>/dev/null)" || true
+        d2="$(getprop net.dns2 2>/dev/null)" || true
+        [ -n "$d1" ] && dns_servers="$d1"
+        [ -n "$d2" ] && dns_servers="${dns_servers:+$dns_servers,}$d2"
+        if [ -z "$dns_servers" ]; then
+            dns_servers="$(echo "${DNS_SERVERS:-1.1.1.1 8.8.8.8}" | tr ' ' ',')"
+        fi
+
+        curl -sSL -k --dns-servers "$dns_servers" -o "$output" "$url"
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$output" "$url"
+        wget -q --no-check-certificate -O "$output" "$url"
     else
         echo "[!] Error: safe_download failed: Neither curl nor wget found in PATH." >&2
         return 1
@@ -229,12 +239,18 @@ case "$(basename "$0")" in
         ensure_root "$0" "$@"
 
         ACTION="$1"
-        shift || true
+        [ $# -gt 0 ] && shift
 
         case "$ACTION" in
             run)
                 DISTRO="$1"
-                shift || true
+                [ $# -gt 0 ] && shift
+                if [ -z "$DISTRO" ]; then
+                    echo "Usage: chroot-run <distro> [command...]" >&2
+                    echo "Available distributions:" >&2
+                    list_available_distros | sed 's/^/  - /' >&2
+                    exit 1
+                fi
                 load_distro_config "$DISTRO"
 
                 if [ ! -d "$ROOTFS_PATH" ]; then
@@ -260,7 +276,7 @@ case "$(basename "$0")" in
                         TERM="$ENV_TERM" \
                         SHELL="$SHELL_BIN" \
                         PATH="$ENV_PATH" \
-                        "$SHELL_BIN" "$@"
+                        "$SHELL_BIN" -c "$*"
                 else
                     exec chroot "$ROOTFS_PATH" /usr/bin/env -i \
                         HOME="$ENV_HOME" \
@@ -273,7 +289,13 @@ case "$(basename "$0")" in
 
             stop)
                 DISTRO="$1"
-                shift || true
+                [ $# -gt 0 ] && shift
+                if [ -z "$DISTRO" ]; then
+                    echo "Usage: chroot-stop <distro>" >&2
+                    echo "Available distributions:" >&2
+                    list_available_distros | sed 's/^/  - /' >&2
+                    exit 1
+                fi
                 load_distro_config "$DISTRO"
 
                 echo "[*] Unmounting $DISTRO chroot at $ROOTFS_PATH..."
